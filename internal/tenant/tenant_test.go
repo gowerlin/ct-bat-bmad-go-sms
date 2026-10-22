@@ -79,3 +79,19 @@ func TestDisableUnknownKey(t *testing.T) {
 		t.Fatal("DisableKey accepted unknown key")
 	}
 }
+
+func TestRateLimitPerMin(t *testing.T) {
+	r := newTestRegistry()
+	r.AddTenant(Tenant{ID: "tenant-c", RateLimitPerMin: 3})
+	cases := map[string]int{"tenant-c": 3, "tenant-a": 0, "ghost": 0}
+	for id, want := range cases {
+		if got := r.RateLimitPerMin(id); got != want {
+			t.Errorf("RateLimitPerMin(%q) = %d, want %d", id, got, want)
+		}
+	}
+	// AddTenant replaces, so a new limit takes effect immediately.
+	r.AddTenant(Tenant{ID: "tenant-c", RateLimitPerMin: 10})
+	if got := r.RateLimitPerMin("tenant-c"); got != 10 {
+		t.Fatalf("after replace = %d, want 10", got)
+	}
+}

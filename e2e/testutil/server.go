@@ -12,7 +12,9 @@ import (
 
 	"example.com/sms-platform/internal/httpapi"
 	"example.com/sms-platform/internal/queue"
+	"example.com/sms-platform/internal/ratelimit"
 	"example.com/sms-platform/internal/store"
+	"example.com/sms-platform/internal/template"
 	"example.com/sms-platform/internal/tenant"
 )
 
@@ -23,6 +25,12 @@ const (
 	KeyA    = "test-key-tenant-a"
 	KeyB    = "test-key-tenant-b"
 )
+
+// TestRateLimitPerMin is the limit NewTestServer gives TenantA and TenantB. It
+// is far above anything a test sends (the queue-full test sends
+// queue.Capacity+1 requests on one key without advancing the clock), so only
+// rate-limit tests, which lower a tenant's limit via Env.Tenants, see 429.
+const TestRateLimitPerMin = 1_000_000
 
 // Env is one running test server plus the fakes wired into it.
 type Env struct {
@@ -46,10 +54,13 @@ func NewTestServer(t testing.TB) *Env {
 	q := queue.NewInProcess(st)
 	reg := tenant.NewRegistry()
 	for id, key := range map[string]string{TenantA: KeyA, TenantB: KeyB} {
-		reg.AddTenant(tenant.Tenant{ID: id})
+		reg.AddTenant(tenant.Tenant{ID: id, RateLimitPerMin: TestRateLimitPerMin})
 		reg.AddKey(id, key)
 	}
-	h := httpapi.NewHandler(httpapi.Deps{Now: clock.Now, Queue: q, Store: st, Tenants: reg})
+	h := httpapi.NewHandler(httpapi.Deps{
+		Now: clock.Now, Queue: q, Store: st, Tenants: reg, Templates: template.NewService(st),
+		Limiter: ratelimit.New(clock.Now, reg.RateLimitPerMin),
+	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	return &Env{Server: srv, Client: srv.Client(), Clock: clock, Provider: prov, Store: st, Queue: q, Tenants: reg}

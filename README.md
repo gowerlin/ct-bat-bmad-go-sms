@@ -44,7 +44,7 @@ make build     # bin/smsd（.gitignore 排除）
 | `_bmad-output/` | 規劃與實作產物（planning-artifacts／implementation-artifacts／test-artifacts） | **進 git** |
 | `.claude/skills/`、`.agents/skills/` | 安裝器產生的 skill 副本（各 39 個、約 14 MB） | `.gitignore` 排除；clone 後重跑下面的指令即可還原 |
 
-在 `sms-platform/` 執行（非互動，可重現；`--pin tea=v1.27.2` 是 v6 安裝器能裝的 TEA 最高版）：
+在 `sms-platform/` 執行（非互動，可重現；`--pin tea=v1.27.2` 是 v6 安裝器能裝的 TEA 最高版）。macOS／Linux／WSL 用 bash：
 
 ```bash
 npx bmad-method@6.12.4 install --directory . \
@@ -53,7 +53,20 @@ npx bmad-method@6.12.4 install --directory . \
   --output-folder _bmad-output --pin tea=v1.27.2 --no-shims --yes
 ```
 
+Windows 用 PowerShell（逗號清單加引號）：
+
+```powershell
+npx bmad-method@6.12.4 install --directory . `
+  --modules 'bmm,tea' --tools 'claude-code,codex' `
+  --user-name <你的名字> --communication-language 繁體中文 --document-output-language 繁體中文 `
+  --output-folder _bmad-output --pin tea=v1.27.2 --no-shims --yes
+```
+
+- **Windows 不要在 Git Bash 跑**：安裝器會把 Git Bash 的目前目錄（`/c/…`）判成 WSL，報「Windows Node.js was launched from a WSL shell」並 exit 1。改用 PowerShell。
+- **PowerShell 下 `--modules`／`--tools` 的逗號清單要加引號**：不加引號會被 PowerShell 拆成陣列，安裝器收到 `claude-code codex`，報 `Unknown tool ID: claude-code codex` 並 exit 1。（T0216 在副本實測：Git Bash exit 1；PowerShell 不加引號 exit 1；加引號 exit 0、約 18 秒。）
+
 - 只用 Claude Code 的話把 `--tools claude-code,codex` 改成 `--tools claude-code`。
+- 課程 repo 提交的 `_bmad/` 設定用中性名 `student`（`config.user.toml` 與 `{bmm,core,tea}/config.yaml` 的 `user_name`，T0215）。在**課程 repo 本身**重跑安裝時帶 `--user-name student`（或不帶，安裝器會沿用上次的值），不要帶自己的名字；重裝會把手改過的 `config.user.toml` 備份成 `config.user.toml.bak` 一次，刪掉即可。在自己的 repo 裡照上面填自己的名字。
 - 驗證：`_bmad/_config/manifest.yaml` 的 `installation.version: 6.12.4` 與 core／bmm／tea 三個模組；`ls .claude/skills | wc -l` 為 39；在 `sms-platform/` 啟動 `claude`，`/bmad-help` 可用。
 - **一律在 `sms-platform/` 啟動 BMad 的 session**：使用者層級可能有 V7 線的 skill，Claude Code 會把它們一起列出來（名稱相同時以專案層為準）。課程 repo 根目錄原本另一份製作用的完整安裝已於 G1 移出 repo（D116 ②），不再混入。
 

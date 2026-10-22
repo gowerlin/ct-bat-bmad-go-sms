@@ -25,6 +25,19 @@ var errUnauthorized = errors.New("httpapi: unauthorized")
 
 const internalMessage = "internal error"
 
+// apiError is a status/code/message (plus optional headers, e.g. Retry-After)
+// a feature maps its sentinel errors to. writeError stays the only place the
+// envelope is written (AD-8).
+type apiError struct {
+	Status        int
+	Code, Message string
+	Header        http.Header
+}
+
+// featureErrorMappers are asked, in order, after the built-in cases and before
+// the 500 default. A mapper returns false for errors it does not own.
+var featureErrorMappers = []func(error) (*apiError, bool){templateError, rateLimitError}
+
 // writeError is the only place an error envelope is produced (AD-8).
 func writeError(w http.ResponseWriter, err error) {
 	status, code, msg := http.StatusInternalServerError, "internal_error", internalMessage
@@ -41,6 +54,15 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, queue.ErrClosed):
 		status, code, msg = http.StatusServiceUnavailable, "queue_full", "service shutting down"
 	default:
+		for _, m := range featureErrorMappers {
+			if ae, ok := m(err); ok {
+				for k, v := range ae.Header {
+					w.Header()[k] = v
+				}
+				writeEnvelope(w, ae.Status, ae.Code, ae.Message)
+				return
+			}
+		}
 		slog.Error("internal_error", "error_class", fmt.Sprintf("%T", err))
 	}
 	writeEnvelope(w, status, code, msg)

@@ -18,6 +18,9 @@ type Tenant struct {
 	// CallbackURL is where outbound status webhooks are sent (stored only;
 	// not used until the webhook stories).
 	CallbackURL string
+	// RateLimitPerMin is the per-minute request limit for each of the tenant's
+	// API keys; <= 0 means unset, and ratelimit applies its default.
+	RateLimitPerMin int
 }
 
 // HashKey returns the SHA-256 hex digest of an API key. Only digests are ever
@@ -50,6 +53,14 @@ func (r *Registry) AddTenant(t Tenant) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.tenants[t.ID] = t
+}
+
+// RateLimitPerMin returns the per-minute limit of tenantID, or 0 (unset) for
+// an unknown tenant. Its signature matches what ratelimit.New takes.
+func (r *Registry) RateLimitPerMin(tenantID string) int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.tenants[tenantID].RateLimitPerMin
 }
 
 // AddKey issues apiKey (stored as its hash) to an existing tenant. It reports

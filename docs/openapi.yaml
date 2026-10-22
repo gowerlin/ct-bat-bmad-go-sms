@@ -50,22 +50,43 @@ paths:
               schema: { $ref: "#/components/schemas/SendMessageResponse" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
         "503": { $ref: "#/components/responses/QueueFull" }
     get:
-      summary: 列表與篩選（CH4，T0006；`?status=`）
+      summary: 列表與篩選（CH4，T0006；`?status=`；本租戶的訊息，依 (created_at, id) 新到舊）
       operationId: listMessages
       parameters:
         - name: status
           in: query
           required: false
+          description: 省略時回本租戶全部狀態；不在列舉內（含空字串、大小寫不同）回 400 invalid_request，訊息不回顯輸入
           schema:
             type: string
             enum: [queued, sending, sent, delivered, undelivered, failed]
+        - name: limit
+          in: query
+          required: false
+          description: 每頁筆數；不在 1–100 的整數回 400 invalid_request
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          description: 上一頁回應的 next_cursor，原樣帶回；不是伺服器產生的值回 400 invalid_request
+          schema:
+            type: string
       responses:
         "200":
-          description: "TODO: MessageList"
+          description: 本租戶符合條件的訊息（一頁）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /v1/messages/{id}:
@@ -88,18 +109,27 @@ paths:
       summary: 建立模板（CH4，T0004）
       operationId: createTemplate
       requestBody:
-        description: "TODO: TemplateRequest（name、body with {{var}}）"
         required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TemplateRequest" }
       responses:
         "201":
-          description: "TODO: Template"
+          description: 已建立
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Template" }
+        "400": { $ref: "#/components/responses/InvalidTemplate" }
         "401": { $ref: "#/components/responses/Unauthorized" }
     get:
-      summary: 列出模板（CH4，T0004）
+      summary: 列出模板（CH4，T0004；本租戶的模板，新到舊，不分頁）
       operationId: listTemplates
       responses:
         "200":
-          description: "TODO: TemplateList"
+          description: 本租戶的模板
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TemplateList" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /v1/templates/{id}:
@@ -110,7 +140,10 @@ paths:
         - $ref: "#/components/parameters/Id"
       responses:
         "200":
-          description: "TODO: Template"
+          description: 模板
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Template" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
@@ -162,7 +195,16 @@ components:
         type: string
   responses:
     BadRequest:
-      description: 欄位缺漏、號碼非 E.164、內容超過 70 code point、JSON 無效；405 方法不符亦用 invalid_request 並帶 Allow
+      description: >-
+        invalid_request：欄位缺漏、號碼非 E.164、內容（直接或模板渲染後）超過 70 code point、
+        body 與 template_id 同時給或都沒給、vars 不是字串值的物件、JSON 無效；405 方法不符亦用 invalid_request 並帶 Allow
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    InvalidTemplate:
+      description: >-
+        invalid_template：模板無法解析（佔位符括號不成對、名稱空白或不合法）；
+        name、body 缺漏或 JSON 無效為 invalid_request
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -196,10 +238,18 @@ components:
             message: { type: string }
     SendMessageRequest:
       type: object
-      required: [to, body]
+      description: body 與 template_id 恰給一個；同時給或都沒給回 400 invalid_request
+      required: [to]
       properties:
         to: { type: string, pattern: '^\+[1-9]\d{1,14}$' }
         body: { type: string, description: 最多 70 個 Unicode code point }
+        template_id:
+          type: string
+          description: 本租戶的模板 id（tpl_ 開頭）；入佇列前渲染，結果同樣受 70 code point 限制；不存在或屬他租戶回 404
+        vars:
+          type: object
+          description: 填 {{name}} 佔位符的值，只收字串（null、數字等回 400）；多餘變數忽略，缺變數回 422
+          additionalProperties: { type: string }
     SendMessageResponse:
       type: object
       required: [id, status]
@@ -217,8 +267,40 @@ components:
         failure_reason: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-    # TODO（後續 Story 補）: MessageList, TemplateRequest, Template,
-    # TemplateList, DeliveryReport, OutboundNotification。
+    TemplateRequest:
+      type: object
+      required: [name, body]
+      properties:
+        name: { type: string }
+        body:
+          type: string
+          description: "含 {{name}} 佔位符；name 為字母或底線開頭，其後字母、數字、底線；括號內前後空白忽略"
+    Template:
+      type: object
+      required: [id, name, body, created_at]
+      properties:
+        id: { type: string, description: "tpl_ 加 128 位元 hex" }
+        name: { type: string }
+        body: { type: string }
+        created_at: { type: string, format: date-time }
+    TemplateList:
+      type: object
+      required: [templates]
+      properties:
+        templates:
+          type: array
+          items: { $ref: "#/components/schemas/Template" }
+    MessageList:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/Message" }
+        next_cursor:
+          type: string
+          description: 不透明字串（AD-14），帶入下一次請求的 cursor；最後一頁省略
+    # TODO（後續 Story 補）: DeliveryReport, OutboundNotification。
 
 security:
   - ApiKey: []

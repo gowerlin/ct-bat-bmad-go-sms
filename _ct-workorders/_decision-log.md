@@ -8,10 +8,87 @@
 
 | D002 | 2026-10-22 | API key 只從 header `X-API-Key` 讀，query 帶 key 視為沒帶 | T0003 |
 | D003 | 2026-10-22 | 路由維持標準庫 `http.ServeMux`，中介層用函式包裝＋`chain` helper（A1），不引入 chi；不推翻 D001 | EXP-ROUTER-001、T9002 |
+| D004 | 2026-10-22 | httpapi 每功能一檔，以明確 stub 預留接口（不用 `init()` registry），讓並行工單不撞檔 | T9003 |
+| D005 | 2026-10-22 | 模板 E2E 暫以 store 讀回的 `Body` 驗證已渲染；FakeProvider 驗證待 queue 送信 worker 補 | T0004 |
+| D006 | 2026-10-22 | `ErrInvalidTemplate` 回 400 `invalid_template`（照 `docs/error-codes.md`），工單的 `invalid_request` 是筆誤 | T0004 |
+| D007 | 2026-10-22 | `vars` 為 JSON 物件、值只收字串；非字串回 400 `invalid_request` | T0004 |
+| D008 | 2026-10-22 | T9004 以模式 ① 機械合併回 `main`（五條判準全過，塔台直接合併，不派合併工單） | T9004 |
+| D009 | 2026-10-22 | 限流：每 API key 一桶，容量＝租戶 `rate_limit_per_min`、每秒補 `rate_limit_per_min/60`；上限放租戶設定、預設 60（使用者決定） | T0005 |
+| D010 | 2026-10-22 | `Retry-After` 取 `max(1, ceil(秒數))`（使用者決定） | T0005 |
 
 ---
 
 ## 詳細紀錄（倒序）
+
+### D010 2026-10-22 — `Retry-After` 取 `max(1, ceil(秒數))`
+
+- **背景**：T0005（yolo）Worker 經 BAT 通道提問 Q-2（提問時間 2026-10-22T23:58:07+0800）：被限流時從「等到下一枚 token 的秒數」換成 `Retry-After` 正整數秒，用哪種取整、最小值多少。工單明定 Worker 不得自行決定。
+- **選項**：
+  - [A] `max(1, ceil(秒數))`，秒數 = `(1 - 目前 tokens) / 每秒補充率`（AD-12 草案）
+  - [B] `floor(秒數) + 1`：剛好整數秒時多等 1 秒
+- **決定**：選 A（使用者決定，4-10 錄製前指定；塔台 2026-10-22T23:58:42+0800 以 `--answer --choice 1` 經 BAT 通道答覆，exit `0`，工單不寫答覆行）。理由：ceil 保證客戶端照 header 等完一定有 token、不會再被拒；`max(1, …)` 保證 header 是正整數（`openapi.yaml` 宣告 integer）。
+- **影響**：`internal/ratelimit` 的 `Retry-After` 計算與單元測試、`e2e/ratelimit_test.go` 的斷言依此實作；改取整規則須開新決策取代本條。
+- **相關工單**：T0005
+
+### D009 2026-10-22 — 限流桶：容量＝租戶 `rate_limit_per_min`，每秒補 `/60`，上限放租戶設定、預設 60
+
+- **背景**：T0005（yolo）Worker 經 BAT 通道提問 Q-1（提問時間 2026-10-22T23:58:07+0800）：桶容量、補充速率、限額來源與未設定時的預設。`internal/tenant/tenant.go` 原本沒有限額欄位，限額來源須一併決定。
+- **選項**：
+  - [A] `tenant.Tenant` 加 `RateLimitPerMin`；每個 API key 一桶，容量 = 所屬租戶 `RateLimitPerMin`，補充率 `RateLimitPerMin/60` token/秒（連續補充），桶初始為滿；`<= 0`（未設定）用預設 60
+  - [B] 只用全域設定（`ratelimit` 建構時給每分鐘上限，預設 60），租戶不帶欄位
+- **決定**：選 A（使用者決定：容量等於租戶的每分鐘上限 `rate_limit_per_min`，每秒補 `rate_limit_per_min/60` 個，上限放在租戶設定、預設 60）；塔台 2026-10-22T23:58:42+0800 以 `--answer --choice 1` 經 BAT 通道答覆，exit `0`，工單不寫答覆行。理由：與 AD-12、`docs/README.md` 資料模型（Tenant 有每分鐘 `rate_limit`）及工單「限額由租戶帶入」一致。
+- **影響**：`tenant.Tenant` 新增每分鐘上限欄位；同租戶多把 key 各一桶、各用租戶限額；`e2e/testutil` 可把測試租戶設小限額以少送請求。設定檔載入 story 上線後，租戶設定檔要帶這個欄位；分散式限流不在範圍。
+- **相關工單**：T0005
+
+### D008 2026-10-22 — T9004 以模式 ① 機械合併回 `main`
+
+- **背景**：T9004 以 `--isolation worktree` 派出（yolo），Worker 回報 DONE，`ct/T9004` 要合併回 `main`。照 `merge-workorder.md` 判準決定模式。
+- **判準**（`--worktree-status T9004`，`source: live`）：① `behind 2`，`base..mainHead` 只有 `_ct-workorders/T9004-onboarding-bat-section.md`（放寬版成立）；② `validated_sha` = `head` = `86e3d7e`；③ `outOfScopeFiles []`、`touchesCtWorkorders false`；④ `conflicts []`；⑤ `dirty []`，主 checkout 髒檔只有 `_tower-state.md`，與 `changedFiles`（`docs/dev-workflow.md`）不重疊。ff 前重查仍成立。
+- **決定**：模式 ①，塔台在整合 worktree `..\.ct-integration\sms-platform`（本次首次建立）開 `ct-merge/T9004` 自 `base_main_sha` `94fecfa`，`--no-ff` 合併得 merge commit `6107732`（parent1 `94fecfa`、parent2 `86e3d7e`）；yolo 斷點 E 自動 `--ff-only`，ff 後 `main` = `6107732`。合併結果與 `head` 只差 `_ct-workorders/**`，不重跑驗收。
+- **影響**：`--close-worker T9004 --worktree remove` exit `0`，Worker 分頁已結束、T9004 worktree 已移除；整合 worktree 已 `switch --detach`。分支 `ct/T9004`、`ct-merge/T9004` 保留，待使用者同意後以 `git branch -d` 刪除。
+- **相關工單**：T9004
+
+### D007 2026-10-22 — `vars` 為 JSON 物件、值只收字串
+
+- **背景**：T0004 讓 `POST /v1/messages` 接受 `template_id`＋`vars`；spine 與 `openapi.yaml` 都沒定 `vars` 的形狀。yolo Worker 以 Q-3 經 BAT 通道問塔台（2026-10-22T23:37:23+0800 答覆，塔台代決）。
+- **選項**：
+  - [A] `object`，`additionalProperties: {type: string}`；數字、布林、`null`、巢狀回 400 `invalid_request`，訊息不回顯內容
+  - [B] 收字串、數字、布林，伺服器端轉成字串
+- **決定**：選 A，理由：沒有隱性轉換（例如 `1.0` 轉成 `"1"`），呼叫端行為可預期；日後要放寬可相容地擴充，反過來收緊則是相容性破壞。證據（T0004 回報區〈互動紀錄〉）：DTO 用 `map[string]*string`，`null` 也擋下，固定訊息 `field 'vars' must be an object of string values`。
+- **影響**：`docs/openapi.yaml` 的 `SendMessageRequest.vars` 為字串值物件；要接受其他型別須開新決策取代本條。
+- **相關工單**：T0004
+
+### D006 2026-10-22 — `ErrInvalidTemplate` 回 400 `invalid_template`
+
+- **背景**：T0004 工單寫 `ErrInvalidTemplate` → 400 `invalid_request`，但 `docs/error-codes.md:14` 與 SPEC 的 error-codes 都定為 400 `invalid_template`（錯誤碼變更屬相容性變更）。Worker 以 Q-2 問塔台；塔台查證 `docs/error-codes.md` 後代決。
+- **選項**：
+  - [A] 照已文件化的契約回 400 `invalid_template`
+  - [B] 照工單回 400 `invalid_request`，差異交塔台
+- **決定**：選 A，理由：錯誤碼是對外契約，文件與 SPEC 一致；工單寫法是塔台開單筆誤。證據：T0004 `errors_templates.go` 的 `templateError` 對應 400 `invalid_template`，`httpapi_test.go` 驗信封；塔台收單重跑 `go test ./... -race` 全綠。
+- **影響**：T0007 只加 `ErrMissingVariable` → 422，保留本條的 400 對應；開單時錯誤碼以 `docs/error-codes.md` 為準。
+- **相關工單**：T0004、T0007
+
+### D005 2026-10-22 — 模板 E2E 暫以 store 讀回的 `Body` 驗證已渲染
+
+- **背景**：T0004 驗收條件寫「用 `FakeProvider` 收到的內容驗證」已渲染，但 `queue.Run` 目前只等 ctx（送信 worker 尚未實作），`testutil` 也沒把 `FakeProvider` 接進 queue，provider 收不到訊息。Worker 以 Q-1 問塔台。
+- **選項**：
+  - [A] 從 `env.Store.Get(testutil.TenantA, id)` 讀 `Body` 驗證，並斷言 `FakeProvider` 沒收到未渲染內容
+  - [B] `GET /v1/messages/{id}` 回應加 `body` 欄位（API 契約變更、檔案不在 `affects_files`）
+  - [C] 本單補 queue 送信 worker（超出範圍）
+- **決定**：選 A，理由：不擴大範圍、不改 API 契約，仍以真實 handler＋`httptest` 驗到「入佇列前已渲染」（AD-16）。證據：`TestE2E_Template_RendersVariables` PASS（塔台收單重跑）。
+- **影響**：工單驗收條件「用 FakeProvider 收到的內容驗證」未達成，屬塔台決定的差異；實作 queue 送信 worker 的工單須把這個 E2E 改成以 `FakeProvider` 收到的內容驗證。
+- **相關工單**：T0004
+
+### D004 2026-10-22 — httpapi 每功能一檔，用明確 stub 預留接口
+
+- **背景**：第四章 T0005（限流）、T0006（列表）、T0007（模板缺變數 422）要 yolo 同時派出，`affects_files` 不能重疊。現況 `handler.go`（路由表、`Deps`、`v1` 串接）、`errors.go`（`writeError` 單一 switch）、`messages.go`（發送／查單筆／DTO）會被三張同時改。
+- **選項**：
+  - [A] 明確 stub：`NewHandler` 預先列好 `registerXxx`，`v1()` 預留 `rateLimit` 直通位置，`writeError` 詢問固定清單 `featureErrorMappers`；各功能填自己的檔。程式裡看得到路由、中介層順序、錯誤對應；代價是新增「全新功能」仍要改一次 `handler.go`／`errors.go`（本章已知的功能由 T9003 預先列好）
+  - [B] 套件層級 registry＋各檔 `init()` 自行註冊：新增功能完全不改共用檔；但順序（authenticate → ratelimit）要靠 order 數字，註冊散在 `init()`，讀程式碼看不出路由表與錯誤對應，與 AD-8「`writeError` 單一對應處」的可讀性相悖
+  - [C] 不重構，三張工單序列派：不撞檔，但放棄並行，也無法示範 yolo 同時派工
+- **決定**：選 A，理由：本章要的功能清單已知，預留接口成本低；明確呼叫讓路由表與中介層順序可一眼讀出，AD-8 的 `writeError` 仍是信封唯一輸出處（mapper 只回 `apiError`，不寫回應）。B 的好處只在「未知的未來功能」，不抵可讀性成本。
+- **影響**：T9003 只做結構調整、行為不變；T0005 填 `ratelimit.go`／`errors_ratelimit.go`／`deps.go`，T0006 新增 `messages_list.go`，T0007 填 `errors_templates.go`／`messages_send.go`，並行三單 `affects_files` 不重疊（`cmd/smsd/main.go`、`e2e/testutil/server.go` 只有 T0004 與 T0005 會改，T0004 先做完）。日後出現 stub 清單以外的新功能，才改 `handler.go`／`errors.go` 一次。
+- **相關工單**：T9003
 
 ### D003 2026-10-22 — 路由維持標準庫 `http.ServeMux`，中介層用函式包裝（A1），不引入 chi
 

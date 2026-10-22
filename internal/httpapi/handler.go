@@ -1,29 +1,9 @@
 package httpapi
 
-import (
-	"net/http"
-	"time"
-
-	"example.com/sms-platform/internal/queue"
-	"example.com/sms-platform/internal/store"
-)
-
-// Deps are the collaborators the handler needs. Queue, Store and Tenants are required
-// (NewHandler panics without them, so a bad assembly fails at startup). There
-// is deliberately no Provider: only the queue talks to providers (AD-1).
-type Deps struct {
-	// Now returns the current time (injected; reserved for time-aware routes).
-	Now func() time.Time
-	// Queue accepts new messages.
-	Queue queue.Queue
-	// Store is the tenant-scoped read view.
-	Store store.TenantScoped
-	// Tenants resolves X-API-Key to a tenant.
-	Tenants Authenticator
-}
+import "net/http"
 
 // NewHandler builds the platform's HTTP handler. The route table mirrors
-// docs/openapi.yaml.
+// docs/openapi.yaml; each feature registers its own routes in its own file.
 func NewHandler(deps Deps) http.Handler {
 	if deps.Queue == nil || deps.Store == nil || deps.Tenants == nil {
 		panic("httpapi: Deps.Queue, Deps.Store and Deps.Tenants are required")
@@ -31,16 +11,19 @@ func NewHandler(deps Deps) http.Handler {
 	s := &server{deps: deps}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", handleHealthz)
-	mux.Handle("POST /v1/messages", s.authenticate(s.handler(s.sendMessage)))
-	mux.Handle("GET /v1/messages/{id}", s.authenticate(s.handler(s.getMessage)))
+	registerHealth(mux)
+	s.registerMessagesSend(mux)
+	s.registerMessagesGet(mux)
+	s.registerMessagesList(mux)
+	s.registerTemplates(mux)
 	return envelopeFallbacks(mux)
 }
 
 type server struct{ deps Deps }
 
-func handleHealthz(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ok"}`))
+// v1 wraps a /v1 route in its middleware. The order is fixed (AD-10):
+// authenticate, then rateLimit, then the handler, so an invalid key has no
+// bucket and gets 401 directly.
+func (s *server) v1(h http.Handler) http.Handler {
+	return s.authenticate(s.rateLimit(h))
 }

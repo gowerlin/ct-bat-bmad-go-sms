@@ -17,7 +17,9 @@ import (
 	"example.com/sms-platform/internal/httpapi"
 	"example.com/sms-platform/internal/provider/mock"
 	"example.com/sms-platform/internal/queue"
+	"example.com/sms-platform/internal/ratelimit"
 	"example.com/sms-platform/internal/store"
+	"example.com/sms-platform/internal/template"
 	"example.com/sms-platform/internal/tenant"
 )
 
@@ -56,7 +58,10 @@ func main() {
 	// TEMPORARY: the registry is empty, so every /v1/* request gets 401 until
 	// config-file loading of tenants and API keys lands (a later story).
 	tenants := tenant.NewRegistry()
-	h := httpapi.NewHandler(httpapi.Deps{Now: time.Now, Queue: q, Store: st, Tenants: tenants})
+	h := httpapi.NewHandler(httpapi.Deps{
+		Now: time.Now, Queue: q, Store: st, Tenants: tenants, Templates: template.NewService(st),
+		Limiter: ratelimit.New(time.Now, tenants.RateLimitPerMin),
+	})
 
 	go func() { _ = q.Run(ctx) }()
 	go purgeLoop(ctx, st)
