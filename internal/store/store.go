@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -147,8 +148,49 @@ type System interface {
 	GetByID(id string) (Message, error)
 	// Transition is a compare-and-set from -> to applying p.
 	Transition(id string, from, to Status, p Patch) (Message, error)
-	// PurgeExpired removes terminal messages older than Retention at now.
+	// TransitionAndNotify is Transition plus, under the same lock, a pending
+	// outbox entry (id, to) for the tenant's webhook (AD-3, AD-5). Both are
+	// written or neither is: an existing (id, to) entry fails the call with
+	// ErrIllegalTransition and leaves the message unchanged.
+	TransitionAndNotify(id string, from, to Status, p Patch) (Message, error)
+	// GetByProviderRef returns the message whose ProviderRef is ref.
+	GetByProviderRef(ref string) (Message, error)
+	// ClaimNext blocks until a pending outbox entry exists, marks the oldest
+	// one delivering and returns it, or returns ctx.Err() once ctx is done.
+	ClaimNext(ctx context.Context) (Notification, error)
+	// FinishNotification records how a claimed entry ended: done or abandoned.
+	FinishNotification(seq int64, state NotificationState) error
+	// PurgeExpired removes terminal messages older than Retention at now,
+	// together with their finished outbox entries.
 	PurgeExpired(now time.Time) int
+}
+
+// NotificationState is where an outbox entry stands (Webhook outbox in
+// state-machines.md): pending → delivering → done | abandoned.
+type NotificationState string
+
+const (
+	NotificationPending    NotificationState = "pending"
+	NotificationDelivering NotificationState = "delivering"
+	NotificationDone       NotificationState = "done"
+	NotificationAbandoned  NotificationState = "abandoned"
+)
+
+// Notification is one outbox entry (OutboundNotification): the tenant is to
+// be told that message MessageID reached Status. (MessageID, Status) is
+// unique; Seq is the enqueue order.
+type Notification struct {
+	Seq       int64
+	MessageID string
+	TenantID  string
+	Status    Status
+	State     NotificationState
+	CreatedAt time.Time
+}
+
+type outboxKey struct {
+	messageID string
+	status    Status
 }
 
 // Memory is the in-memory implementation of TenantScoped and System.
@@ -157,6 +199,12 @@ type Memory struct {
 	mu   sync.Mutex
 	msgs map[string]Message
 	tpls map[string]Template
+
+	notes     map[int64]Notification
+	noteKeys  map[outboxKey]int64
+	pending   []int64 // seqs waiting for ClaimNext, oldest first
+	lastSeq   int64
+	noteReady chan struct{} // closed and replaced whenever pending grows
 }
 
 var (
@@ -169,7 +217,10 @@ func New(now func() time.Time) *Memory {
 	if now == nil {
 		panic("store: New requires a Now function")
 	}
-	return &Memory{now: now, msgs: make(map[string]Message), tpls: make(map[string]Template)}
+	return &Memory{
+		now: now, msgs: make(map[string]Message), tpls: make(map[string]Template),
+		notes: make(map[int64]Notification), noteKeys: make(map[outboxKey]int64), noteReady: make(chan struct{}),
+	}
 }
 
 // NewID returns prefix followed by 128 random bits in hex (AD-10).
@@ -377,10 +428,36 @@ func (s *Memory) GetByID(id string) (Message, error) {
 	return m, nil
 }
 
+// GetByProviderRef implements System. An empty ref never matches.
+func (s *Memory) GetByProviderRef(ref string) (Message, error) {
+	if ref == "" {
+		return Message{}, ErrNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, m := range s.msgs {
+		if m.ProviderRef == ref {
+			return m, nil
+		}
+	}
+	return Message{}, ErrNotFound
+}
+
 // Transition implements System.
 func (s *Memory) Transition(id string, from, to Status, p Patch) (Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.transitionLocked(id, from, to, p, false)
+}
+
+// TransitionAndNotify implements System.
+func (s *Memory) TransitionAndNotify(id string, from, to Status, p Patch) (Message, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.transitionLocked(id, from, to, p, true)
+}
+
+func (s *Memory) transitionLocked(id string, from, to Status, p Patch, notify bool) (Message, error) {
 	m, ok := s.msgs[id]
 	if !ok {
 		return Message{}, ErrNotFound
@@ -389,6 +466,10 @@ func (s *Memory) Transition(id string, from, to Status, p Patch) (Message, error
 		return Message{}, ErrIllegalTransition
 	}
 	if (to == StatusFailed || to == StatusUndelivered) && p.FailureReason == "" {
+		return Message{}, ErrIllegalTransition
+	}
+	key := outboxKey{messageID: id, status: to}
+	if _, dup := s.noteKeys[key]; notify && dup {
 		return Message{}, ErrIllegalTransition
 	}
 	if p.Attempts != 0 {
@@ -406,10 +487,93 @@ func (s *Memory) Transition(id string, from, to Status, p Patch) (Message, error
 		m.TerminalAt = t
 	}
 	s.msgs[id] = m
+	if notify {
+		s.lastSeq++
+		s.notes[s.lastSeq] = Notification{
+			Seq: s.lastSeq, MessageID: id, TenantID: m.TenantID, Status: to,
+			State: NotificationPending, CreatedAt: t,
+		}
+		s.noteKeys[key] = s.lastSeq
+		s.pending = append(s.pending, s.lastSeq)
+		close(s.noteReady)
+		s.noteReady = make(chan struct{})
+	}
 	return m, nil
 }
 
+// ClaimNext implements System.
+func (s *Memory) ClaimNext(ctx context.Context) (Notification, error) {
+	for {
+		s.mu.Lock()
+		if len(s.pending) > 0 {
+			seq := s.pending[0]
+			s.pending = s.pending[1:]
+			n := s.notes[seq]
+			n.State = NotificationDelivering
+			s.notes[seq] = n
+			s.mu.Unlock()
+			return n, nil
+		}
+		ready := s.noteReady
+		s.mu.Unlock()
+		select {
+		case <-ready:
+		case <-ctx.Done():
+			return Notification{}, ctx.Err()
+		}
+	}
+}
+
+// FinishNotification implements System. Only a delivering entry can finish,
+// and only as done or abandoned.
+func (s *Memory) FinishNotification(seq int64, state NotificationState) error {
+	if state != NotificationDone && state != NotificationAbandoned {
+		return ErrIllegalTransition
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n, ok := s.notes[seq]
+	if !ok {
+		return ErrNotFound
+	}
+	if n.State != NotificationDelivering {
+		return ErrIllegalTransition
+	}
+	n.State = state
+	s.notes[seq] = n
+	return nil
+}
+
+// Notifications returns the outbox entries of messageID in enqueue order (for
+// tests and diagnostics).
+func (s *Memory) Notifications(messageID string) []Notification {
+	s.mu.Lock()
+	out := []Notification{}
+	for _, n := range s.notes {
+		if n.MessageID == messageID {
+			out = append(out, n)
+		}
+	}
+	s.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	return out
+}
+
+// OutboxIdle reports whether no outbox entry is pending or delivering.
+func (s *Memory) OutboxIdle() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, n := range s.notes {
+		if n.State == NotificationPending || n.State == NotificationDelivering {
+			return false
+		}
+	}
+	return true
+}
+
 // PurgeExpired implements System and returns how many messages were removed.
+// Outbox entries of a removed message go with it once they are finished;
+// pending or delivering ones stay until the Dispatcher finishes them.
 func (s *Memory) PurgeExpired(now time.Time) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -418,6 +582,15 @@ func (s *Memory) PurgeExpired(now time.Time) int {
 		if IsTerminal(m.Status) && now.Sub(m.TerminalAt) > Retention {
 			delete(s.msgs, id)
 			n++
+		}
+	}
+	for seq, note := range s.notes {
+		if _, kept := s.msgs[note.MessageID]; kept {
+			continue
+		}
+		if note.State == NotificationDone || note.State == NotificationAbandoned {
+			delete(s.notes, seq)
+			delete(s.noteKeys, outboxKey{messageID: note.MessageID, status: note.Status})
 		}
 	}
 	return n

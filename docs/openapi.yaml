@@ -169,16 +169,48 @@ paths:
           schema:
             type: string
             enum: [mock, mitake]
+      description: >-
+        供應商回報送達結果。不經 API key、不計限流；驗證由該供應商的 ParseCallback 負責
+        （共用密鑰、constant-time）。以 provider_ref 找到 sent 的訊息並轉為 delivered／undelivered，
+        同一個原子操作寫入租戶通知 outbox，(message_id, status) 唯一，所以重複回呼不會重複通知租戶（D015）。
       requestBody:
-        description: "TODO: 供應商各自的回呼格式，由 Provider.ParseCallback 解析"
+        required: true
+        description: >-
+          格式由各供應商的 ParseCallback 定義。mock：表單或 query `ref=<provider_ref>&status=delivered|undelivered`
+          （status 省略視為 delivered，無驗證，只供本機示範）。mitake（模擬，非真實規格）：
+          `application/x-www-form-urlencoded` 的 `msgid`、`statuscode`、選填 `donetime`，
+          並以 header `X-Mitake-Secret` 帶 PROVIDER_CALLBACK_SECRET（D017）。
+        content:
+          application/x-www-form-urlencoded:
+            schema: { type: object }
       responses:
         "204":
-          description: 已接收
+          description: 本次回呼造成狀態轉移（sent → delivered／undelivered），租戶通知已入列
+        "200":
+          description: 訊息已是終態（重複回呼或終態後的回呼），狀態不變、不再通知；body 為空
+        "400":
+          description: invalid_request：供應商無法解析的回呼，或狀態不是 delivered／undelivered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: unauthorized：回呼驗證失敗（ParseCallback 回 ErrUnauthorized），狀態不變
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "404":
-          description: 未知供應商或 provider_ref
+          description: not_found：未知供應商、查無 provider_ref，或訊息尚未寫入 sent（由供應商重送）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
-# 出站（非本 API 的路徑）：平台以 HMAC 簽章 POST 到租戶的 callback_url，
-# 每則訊息最多通知一次（OutboundNotification，CH5 T0009）。TODO: 文件化 payload 與簽章 header。
+# 出站（非本 API 的路徑）：狀態經供應商回呼轉為 delivered／undelivered 時，平台 POST 到
+# 租戶的 callback_url（租戶沒有 callback_url 則不通知），每個 (message_id, status) 最多一次：
+#   Content-Type: application/json
+#   X-Signature: sha256=<小寫 hex>   # HMAC-SHA256(租戶 callback secret, 原始 body bytes)，不含時間戳（D013）
+#   body: {"id":"msg_…","status":"delivered"}   # 固定兩個欄位，見 components.schemas.WebhookNotification
+# 租戶回 2xx 即完成；否則退避 1s、2s、4s 重試，共 4 次，用盡只記日誌、不改訊息狀態。
+# 同一訊息的通知依產生順序送出。驗證範例見 docs/onboarding.md。
 
 components:
   securitySchemes:
@@ -236,6 +268,15 @@ components:
           properties:
             code: { type: string, description: 見 docs/error-codes.md }
             message: { type: string }
+    WebhookNotification:
+      type: object
+      description: >-
+        平台送到租戶 callback_url 的通知 body（出站，非本 API 的路徑）。header
+        `X-Signature: sha256=<小寫 hex>` 為 HMAC-SHA256(租戶 callback secret, 原始 body bytes)。
+      required: [id, status]
+      properties:
+        id: { type: string, description: 訊息 id（msg_ 開頭） }
+        status: { type: string, enum: [delivered, undelivered] }
     SendMessageRequest:
       type: object
       description: body 與 template_id 恰給一個；同時給或都沒給回 400 invalid_request
@@ -263,8 +304,12 @@ components:
         id: { type: string }
         to: { type: string }
         status: { type: string, enum: [queued, sending, sent, delivered, undelivered, failed] }
-        attempts: { type: integer }
-        failure_reason: { type: string }
+        attempts:
+          type: integer
+          description: 已呼叫供應商 Send 的次數（成功那次也算），與 sent／failed 轉移同時寫入，之前為 0；最多 4 次（首次＋重試 3 次，退避 1s、2s、4s）
+        failure_reason:
+          type: string
+          description: 只在 failed／undelivered 出現：「重試用盡」、「永久失敗」、「供應商回報未送達」或「回呼逾時」；不含收件號碼與簡訊內容
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     TemplateRequest:

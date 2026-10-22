@@ -18,16 +18,25 @@ const modulePath = "example.com/sms-platform/"
 // packages they may import. Packages not listed here (cmd/smsd, e2e) are
 // assembly roots and may import any internal package.
 var allowedImports = map[string][]string{
-	"httpapi":         {"tenant", "ratelimit", "template", "queue", "webhook", "store", "provider"},
-	"queue":           {"provider", "store"},
-	"webhook":         {"provider", "store"},
-	"tenant":          {"store"},
-	"template":        {"store"},
-	"ratelimit":       {},
-	"store":           {},
-	"provider":        {},
-	"provider/mock":   {"provider"},
-	"provider/mitake": {"provider"},
+	"httpapi":               {"tenant", "ratelimit", "template", "queue", "webhook", "store", "provider"},
+	"queue":                 {"provider", "store"},
+	"webhook":               {"provider", "store"},
+	"tenant":                {"store"},
+	"template":              {"store"},
+	"ratelimit":             {},
+	"store":                 {},
+	"provider":              {},
+	"provider/mock":         {"provider"},
+	"provider/mitake":       {"provider"},
+	"provider/providertest": {"provider"},
+}
+
+// testOnlyImports are edges allowed only from _test.go files: every adapter
+// runs the shared contract (AD-1) in its tests, but adapter product code must
+// not depend on the test helper.
+var testOnlyImports = map[string][]string{
+	"provider/mock":   {"provider/providertest"},
+	"provider/mitake": {"provider/providertest"},
 }
 
 // repoRoot is the module root; go test runs with the package dir (e2e) as cwd.
@@ -83,26 +92,54 @@ func TestArchitecture_ImportGraph(t *testing.T) {
 				continue
 			}
 			target := strings.TrimPrefix(path, modulePath+"internal/")
-			if pkg == "" {
-				continue // assembly roots may import anything internal
+			if msg := importViolation(f, pkg, target); msg != "" {
+				t.Error(msg)
 			}
-			if pkg == target {
-				continue
-			}
-			allowed, known := allowedImports[pkg]
-			if !known {
-				t.Errorf("%s: package internal/%s is not in the architecture graph", f, pkg)
-				continue
-			}
-			ok := false
-			for _, a := range allowed {
-				if a == target {
-					ok = true
-				}
-			}
-			if !ok {
-				t.Errorf("%s: internal/%s must not import internal/%s", f, pkg, target)
-			}
+		}
+	}
+}
+
+// importViolation returns why file (in internal/pkg) may not import
+// internal/target, or "" when the edge is allowed.
+func importViolation(file, pkg, target string) string {
+	if pkg == "" {
+		return "" // assembly roots may import anything internal
+	}
+	if pkg == target {
+		return ""
+	}
+	allowed, known := allowedImports[pkg]
+	if !known {
+		return file + ": package internal/" + pkg + " is not in the architecture graph"
+	}
+	if strings.HasSuffix(file, "_test.go") {
+		allowed = append(allowed[:len(allowed):len(allowed)], testOnlyImports[pkg]...)
+	}
+	for _, a := range allowed {
+		if a == target {
+			return ""
+		}
+	}
+	return file + ": internal/" + pkg + " must not import internal/" + target
+}
+
+func TestArchitecture_TestOnlyImportsRejectedInProductCode(t *testing.T) {
+	cases := []struct {
+		file, target string
+		allowed      bool
+	}{
+		{"../internal/provider/mock/mock_test.go", "provider/providertest", true},
+		{"../internal/provider/mitake/mitake_test.go", "provider/providertest", true},
+		{"../internal/provider/mock/mock.go", "provider/providertest", false},
+		{"../internal/provider/mitake/mitake.go", "provider/providertest", false},
+		{"../internal/queue/queue_test.go", "provider/providertest", false},
+		{"../internal/provider/providertest/contract.go", "provider", true},
+		{"../internal/provider/providertest/contract.go", "provider/mock", false},
+	}
+	for _, c := range cases {
+		msg := importViolation(c.file, pkgOf(c.file), c.target)
+		if got := msg == ""; got != c.allowed {
+			t.Errorf("%s importing internal/%s: allowed=%v, want %v (%s)", c.file, c.target, got, c.allowed, msg)
 		}
 	}
 }
@@ -183,14 +220,53 @@ func TestArchitecture_ForbiddenCalls(t *testing.T) {
 	}
 }
 
-func TestArchitecture_GoModHasNoRequire(t *testing.T) {
+// godogModule is the only direct dependency go.mod may have (CH5 5-07, the
+// optional godog Feature); everything it pulls in must stay "// indirect".
+const godogModule = "github.com/cucumber/godog"
+
+func TestArchitecture_GoModOnlyRequiresGodog(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(repoRoot, "go.mod"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	inBlock := false
 	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "require") {
-			t.Errorf("go.mod must have no require: %q", line)
+		line = strings.TrimSpace(line)
+		switch {
+		case line == "require (":
+			inBlock = true
+			continue
+		case inBlock && line == ")":
+			inBlock = false
+			continue
+		case strings.HasPrefix(line, "require "):
+			line = strings.TrimSpace(strings.TrimPrefix(line, "require "))
+		case !inBlock:
+			continue
+		}
+		if line == "" || strings.HasSuffix(line, "// indirect") {
+			continue
+		}
+		if f := strings.Fields(line); f[0] != godogModule {
+			t.Errorf("go.mod may only require %s directly, got %q", godogModule, line)
+		}
+	}
+}
+
+func TestArchitecture_GodogOnlyInFeatures(t *testing.T) {
+	for _, f := range goFiles(t) {
+		rel := strings.TrimPrefix(f, repoRoot+"/")
+		if strings.HasPrefix(rel, "features/") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), filepath.FromSlash(f), nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, imp := range file.Imports {
+			if strings.HasPrefix(strings.Trim(imp.Path.Value, `"`), godogModule) {
+				t.Errorf("%s imports %s; only features/ may", rel, imp.Path.Value)
+			}
 		}
 	}
 }

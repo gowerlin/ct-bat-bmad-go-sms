@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"example.com/sms-platform/e2e/testutil"
+	"example.com/sms-platform/internal/store"
 )
 
 type templateBody struct {
@@ -56,9 +57,9 @@ func TestE2E_Template_RendersVariables(t *testing.T) {
 		t.Fatalf("list templates: %d %s", resp.StatusCode, body)
 	}
 
-	// Send with template_id + vars: rendered before Submit (AD-16). The queue
-	// has no sending workers yet, so the rendered body is read back from the
-	// store (T0004 Q-1); the provider must not have seen any raw template.
+	// Send with template_id + vars: rendered before Submit (AD-16), so the
+	// stored message already has the rendered body and the send worker hands
+	// exactly that body to the provider (D005).
 	resp, body = send(t, env, `{"to":"+886900000001","template_id":"`+tpl.ID+`","vars":{"order_id":"A123","extra":"ignored"}}`)
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("send with template: %d %s", resp.StatusCode, body)
@@ -74,10 +75,10 @@ func TestE2E_Template_RendersVariables(t *testing.T) {
 	if msg.Body != "訂單 A123 已出貨" {
 		t.Fatalf("stored body = %q, want rendered", msg.Body)
 	}
-	for _, m := range env.Provider.Sent() {
-		if strings.Contains(m.Body, "{{") {
-			t.Fatalf("provider received an unrendered body: %q", m.Body)
-		}
+	env.AwaitStatus(t, sent.ID, store.StatusSent)
+	delivered := env.Provider.Sent()
+	if len(delivered) != 1 || delivered[0].ID != sent.ID || delivered[0].Body != "訂單 A123 已出貨" {
+		t.Fatalf("provider received %+v, want one message %s with the rendered body", delivered, sent.ID)
 	}
 
 	// Templates belong to a tenant: tenant B cannot read, use, list or delete A's.

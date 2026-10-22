@@ -27,9 +27,15 @@ type FakeProvider struct {
 	now       func() time.Time
 	delay     time.Duration
 	responses []Response
-	reports   []provider.DeliveryReport
+	callbacks []callbackResult
 	sent      []provider.OutboundMessage
 	seq       int
+}
+
+// callbackResult is one scripted answer of ParseCallback.
+type callbackResult struct {
+	report provider.DeliveryReport
+	err    error
 }
 
 var _ provider.Provider = (*FakeProvider)(nil)
@@ -63,7 +69,17 @@ func (p *FakeProvider) SetDelay(d time.Duration) {
 func (p *FakeProvider) EnqueueReport(reports ...provider.DeliveryReport) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.reports = append(p.reports, reports...)
+	for _, r := range reports {
+		p.callbacks = append(p.callbacks, callbackResult{report: r})
+	}
+}
+
+// EnqueueCallbackError makes the next ParseCallback fail with err, for
+// example one wrapping provider.ErrUnauthorized.
+func (p *FakeProvider) EnqueueCallbackError(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.callbacks = append(p.callbacks, callbackResult{err: err})
 }
 
 // Sent returns a copy of every message handed to Send, in order.
@@ -108,14 +124,14 @@ func (p *FakeProvider) Send(ctx context.Context, msg provider.OutboundMessage) (
 }
 
 // ParseCallback implements provider.Provider: it returns the next enqueued
-// report, or an error when none is scripted.
+// report or error, or an error when none is scripted.
 func (p *FakeProvider) ParseCallback(_ *http.Request) (provider.DeliveryReport, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if len(p.reports) == 0 {
+	if len(p.callbacks) == 0 {
 		return provider.DeliveryReport{}, fmt.Errorf("fake provider: no delivery report enqueued")
 	}
-	r := p.reports[0]
-	p.reports = p.reports[1:]
-	return r, nil
+	c := p.callbacks[0]
+	p.callbacks = p.callbacks[1:]
+	return c.report, c.err
 }

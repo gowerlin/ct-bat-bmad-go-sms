@@ -7,6 +7,7 @@
 //     made, back-off between attempts, marking a message failed when retries
 //     are exhausted.
 //   - does not own: the Provider itself (provider), the message record
-//     (store), HTTP (httpapi). Time comes in through an injectable clock so
-//     E2E tests can advance it.
+//     (store), HTTP (httpapi). Back-off waits go through an injected Wait so
+//     E2E tests can drive them with a fake clock; timestamps come from the
+//     store's own Now.
 package queue

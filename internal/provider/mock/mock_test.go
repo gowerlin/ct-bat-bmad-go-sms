@@ -3,12 +3,46 @@ package mock
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"example.com/sms-platform/internal/provider"
+	"example.com/sms-platform/internal/provider/providertest"
 )
+
+// TestContract runs the shared provider contract (AD-1). The mock has no
+// callback authentication, so UnauthorizedCallback stays nil (D018; known gap
+// against AD-7).
+func TestContract(t *testing.T) {
+	providertest.Run(t, providertest.Harness{
+		New: func(t *testing.T, o providertest.Outcome) provider.Provider {
+			p := NewWithClock(fixedClock)
+			switch o {
+			case providertest.FailTransient:
+				p.FailTransient(0)
+			case providertest.FailPermanent:
+				p.FailPermanent()
+			}
+			return p
+		},
+		Callback: func(t *testing.T, ref string) (*http.Request, provider.Status) {
+			return callbackRequest(url.Values{"ref": {ref}, "status": {"delivered"}}), provider.StatusDelivered
+		},
+		MalformedCallback: func(t *testing.T) *http.Request {
+			return callbackRequest(url.Values{"status": {"delivered"}})
+		},
+	})
+}
+
+func callbackRequest(form url.Values) *http.Request {
+	r := httptest.NewRequest(http.MethodPost, "/v1/providers/mock/callbacks", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return r
+}
 
 var msg = provider.OutboundMessage{ID: "m1", To: "+886900000001", Body: "hi"}
 
@@ -137,5 +171,72 @@ func TestInjection_ConcurrentSafe(t *testing.T) {
 	}
 	for i := 0; i < 8; i++ {
 		<-done
+	}
+}
+
+func TestEmitCallbacks_DeliveredAfterWaitThroughSink(t *testing.T) {
+	p := NewWithClock(fixedClock)
+	got := make(chan *http.Request, 4)
+	waited := make(chan time.Duration, 4)
+	wait := func(_ context.Context, d time.Duration) error {
+		waited <- d
+		return nil
+	}
+	p.EmitCallbacks(context.Background(), func(_ context.Context, r *http.Request) { got <- r }, wait, 3*time.Second)
+
+	p.FailPermanent()
+	if _, err := p.Send(context.Background(), provider.OutboundMessage{ID: "m0", To: "+886900000001"}); err == nil {
+		t.Fatal("injected failure did not fail")
+	}
+	p.Reset()
+	receipt, err := p.Send(context.Background(), provider.OutboundMessage{ID: "m1", To: "+886900000001"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var r *http.Request
+	select {
+	case r = <-got:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no callback reached the sink")
+	}
+	if d := <-waited; d != 3*time.Second {
+		t.Fatalf("waited %v", d)
+	}
+	if r.Method != http.MethodPost || r.URL.Path != CallbackPath {
+		t.Fatalf("callback %s %s", r.Method, r.URL.Path)
+	}
+	rep, err := p.ParseCallback(r)
+	if err != nil || rep.ProviderRef != receipt.ProviderRef || rep.Status != provider.StatusDelivered {
+		t.Fatalf("parsed %+v %v (receipt %s)", rep, err, receipt.ProviderRef)
+	}
+	select {
+	case extra := <-got:
+		t.Fatalf("failed Send emitted a callback: %v", extra.URL)
+	default:
+	}
+}
+
+func TestEmitCallbacks_CancelledWaitAndNilSinkEmitNothing(t *testing.T) {
+	p := NewWithClock(fixedClock)
+	got := make(chan *http.Request, 1)
+	done := make(chan struct{})
+	wait := func(context.Context, time.Duration) error {
+		defer close(done)
+		return context.Canceled
+	}
+	p.EmitCallbacks(context.Background(), func(_ context.Context, r *http.Request) { got <- r }, wait, time.Second)
+	if _, err := p.Send(context.Background(), provider.OutboundMessage{ID: "m1"}); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	p.EmitCallbacks(context.Background(), nil, nil, 0)
+	if _, err := p.Send(context.Background(), provider.OutboundMessage{ID: "m2"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case r := <-got:
+		t.Fatalf("callback emitted: %v", r.URL)
+	default:
 	}
 }

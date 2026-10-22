@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-22-2026 17:29
-last_updated: 10-22-2026 17:44
+last_updated: 10-23-2026 03:37
 project: sms-platform
 project_key: NOKEY
 tracking_system: file-system
@@ -37,18 +37,73 @@ story_location: _bmad-output/implementation-artifacts
 development_status:
   epic-1: in-progress
   1-1-送出訊息並可查詢: review
-  1-2-mock-provider-故障注入: backlog
-  1-3-依-status-列表篩選: backlog
-  1-4-模板渲染變數: backlog
-  1-5-模板缺變數回-422: backlog
-  1-6-重試後成功: backlog
-  1-7-重試用盡標記-failed: backlog
-  1-8-回呼更新狀態並只通知租戶一次: backlog
-  1-9-mitake-風格-adapter-契約測試: backlog
-  epic-1-retrospective: optional
+  1-2-mock-provider-故障注入: done
+  1-3-依-status-列表篩選: done
+  1-4-模板渲染變數: done
+  1-5-模板缺變數回-422: done
+  1-6-重試後成功: done
+  1-7-重試用盡標記-failed: done
+  1-8-回呼更新狀態並只通知租戶一次: done
+  1-9-mitake-風格-adapter-契約測試: done
+  epic-1-retrospective: done
 
-  epic-2: backlog
-  2-1-缺-api-key-回-401: backlog
-  2-2-跨租戶查詢回-404: backlog
-  2-3-超量回-429-與-retry-after: backlog
+  epic-2: done
+  2-1-缺-api-key-回-401: done
+  2-2-跨租戶查詢回-404: done
+  2-3-超量回-429-與-retry-after: done
   epic-2-retrospective: optional
+action_items:
+  - id: "epic-1-retro-item-1-補-sms_config-載入並在-cmd-smsd-組裝真實租戶-驗收含以真實"
+    epic: 1
+    action: "補 SMS_CONFIG 載入並在 cmd/smsd 組裝真實租戶，驗收含以真實 smsd 送件並查詢"
+    owner: "Amelia"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-23.md"
+  - id: "epic-1-retro-item-2-決定-story-1-1-收單-補-code-review-後標-done-或"
+    epic: 1
+    action: "決定 Story 1.1 收單：補 code review 後標 done，或 spec 檔改回 review"
+    owner: "塔台＋使用者"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-23.md"
+  - id: "epic-1-retro-item-3-決定-sent-failed-是否通知租戶-並對齊-queue-或-epic-1"
+    epic: 1
+    action: "決定 sent／failed 是否通知租戶，並對齊 queue 或 epic-1-context"
+    owner: "John／Amelia"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-23.md"
+  - id: "epic-1-retro-item-4-定-provider-send-逾時值與暫時-永久歸類"
+    epic: 1
+    action: "定 Provider.Send 逾時值與暫時／永久歸類"
+    owner: "Winston"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-23.md"
+  - id: "epic-1-retro-item-5-send-成功但-providerref-為空時視為永久失敗或記-log"
+    epic: 1
+    action: "Send 成功但 ProviderRef 為空時視為永久失敗或記 log"
+    owner: "Amelia"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-23.md"
+  - id: "epic-1-retro-item-6-補-cmd-smsd-main_test-go-關機順序-purgeloop-q"
+    epic: 1
+    action: "補 cmd/smsd/main_test.go：關機順序、purgeLoop、q.Run 錯誤 log、provider 組裝"
+    owner: "Murat"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-23.md"
+  - id: "epic-1-retro-item-7-回寫-epic-1-context-與-spine-provider_url-m"
+    epic: 1
+    action: "回寫 epic-1-context 與 SPINE：PROVIDER_URL、MITAKE 帳密鍵、只通知回呼轉移的取捨"
+    owner: "Winston"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-23.md"
+  - id: "epic-1-retro-item-8-流程-sprint-status-同步責任-開單對照-spine-提問逾時與輪詢"
+    epic: 1
+    action: "流程：sprint-status 同步責任、開單對照 SPINE、提問逾時與輪詢間隔、驗收指令限定 *.go"
+    owner: "塔台"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-23.md"
+  - id: "epic-1-retro-item-9-量測-post-v1-messages-p95-是否小於-200-ms"
+    epic: 1
+    action: "量測 POST /v1/messages p95 是否小於 200 ms"
+    owner: "Murat"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-23.md"

@@ -12,7 +12,7 @@ Go 示範專案：SMS 通訊平台（REST 發送 API、供應商 adapter、佇�
 - 不連外網：測試與示範不得呼叫真實 SMS 供應商或外部服務；供應商一律用 `mock` 或 `httptest.Server`。
 - 不用真實憑證：不得出現真實 API key、token、手機號碼；示範號碼用 `+8869000000xx`。`.env` 不進 git，只有 `.env.example` 列鍵名。
 - 不略過測試：不得用 `t.Skip`、刪除測試或改寬斷言讓門檻變綠。
-- 不新增外部依賴（`go.mod` 只有標準庫）；godog 為 CH5 選配，須工單明示。
+- 不新增外部依賴：`go.mod` 只直接依賴 godog（CH5 5-07 選配，只給 `features/` 用，`e2e/architecture_test.go` 把關）；其他依賴須工單明示。
 - 不動 `_bmad/`（安裝器產物）；要改設定走 `_bmad/custom/` 或重跑安裝器。
 - 工單只改 `affects_files` 列出的檔案（路徑相對本目錄）。
 
@@ -55,3 +55,15 @@ Go 示範專案：SMS 通訊平台（REST 發送 API、供應商 adapter、佇�
 - 暫存腳本寫在 `_bmad-output/tmp/`，不要寫到專案目錄外的系統暫存資料夾。（PRD validate 發生過一次）
 
 <!-- /bmad:context -->
+
+## Windows 主機跑 `-race`：先讓這個 shell 找得到 gcc
+
+`go test ./... -race` 要 cgo，cgo 要 gcc。Windows 主機請先在**目前這個 shell** 做下面三步，再跑收單門檻；不要改系統設定或使用者設定檔。dev container 已內建 gcc，不必做。
+
+1. 檢查：`gcc --version`（PowerShell 也可用 `Get-Command gcc`）。有版本號就跳到第 3 步。
+2. 找不到時，把 MinGW-w64 安裝位置底下含 `gcc.exe` 的 `bin` 目錄加入 PATH（位置依各人安裝而定；不知道裝在哪就搜尋，例如 PowerShell：`Get-ChildItem C:\ProgramData, C:\msys64, "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Filter gcc.exe -Recurse -Depth 5 -ErrorAction SilentlyContinue | Select-Object -First 3 FullName`）：
+   - PowerShell：`$env:Path = '<MinGW 的 bin 目錄>;' + $env:Path`
+   - Git Bash：`export PATH="$(cygpath -u '<MinGW 的 bin 目錄>'):$PATH"`
+3. 設 `CGO_ENABLED=1`（PowerShell：`$env:CGO_ENABLED = '1'`；Git Bash：`export CGO_ENABLED=1`），用 `go env CGO_ENABLED CC` 確認是 `1` 與 `gcc`，再跑 `go test ./... -race -count=1`。
+
+找不到 gcc 就停下來回報，不要拿掉 `-race` 讓門檻變綠。

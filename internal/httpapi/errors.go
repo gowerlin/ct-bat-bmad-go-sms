@@ -36,7 +36,7 @@ type apiError struct {
 
 // featureErrorMappers are asked, in order, after the built-in cases and before
 // the 500 default. A mapper returns false for errors it does not own.
-var featureErrorMappers = []func(error) (*apiError, bool){templateError, rateLimitError}
+var featureErrorMappers = []func(error) (*apiError, bool){templateError, rateLimitError, callbackError}
 
 // writeError is the only place an error envelope is produced (AD-8).
 func writeError(w http.ResponseWriter, err error) {

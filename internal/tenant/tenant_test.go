@@ -1,7 +1,11 @@
 package tenant
 
 import (
+	"bytes"
 	"errors"
+	"log/slog"
+	"sort"
+	"strings"
 	"testing"
 )
 
@@ -93,5 +97,42 @@ func TestRateLimitPerMin(t *testing.T) {
 	r.AddTenant(Tenant{ID: "tenant-c", RateLimitPerMin: 10})
 	if got := r.RateLimitPerMin("tenant-c"); got != 10 {
 		t.Fatalf("after replace = %d, want 10", got)
+	}
+}
+
+func TestCallbackAndSetCallback(t *testing.T) {
+	r := newTestRegistry()
+	if url, secret := r.Callback("tenant-b"); url != "" || secret != "" {
+		t.Fatalf("tenant-b without callback = %q, %q", url, secret)
+	}
+	if url, secret := r.Callback("nobody"); url != "" || secret != "" {
+		t.Fatalf("unknown tenant = %q, %q", url, secret)
+	}
+	if r.SetCallback("nobody", "https://example.com/x", "test-secret") {
+		t.Fatal("SetCallback on unknown tenant reported true")
+	}
+	if !r.SetCallback("tenant-b", "https://example.com/b", "test-secret") {
+		t.Fatal("SetCallback on tenant-b reported false")
+	}
+	if url, secret := r.Callback("tenant-b"); url != "https://example.com/b" || secret != "test-secret" {
+		t.Fatalf("tenant-b callback = %q, %q", url, secret)
+	}
+	// The key stays valid: SetCallback only touches the callback fields.
+	if got, err := r.Authenticate("test-key-b"); err != nil || got.CallbackSecret != "test-secret" {
+		t.Fatalf("authenticate after SetCallback: %v", err)
+	}
+	urls := r.CallbackURLs()
+	sort.Strings(urls)
+	if strings.Join(urls, ",") != "https://example.com/a,https://example.com/b" {
+		t.Fatalf("CallbackURLs = %v", urls)
+	}
+}
+
+func TestTenantLogValueOmitsSecret(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
+	log.Info("tenant", "tenant", Tenant{ID: "tenant-a", CallbackURL: "https://example.com/a", CallbackSecret: "test-secret"})
+	if out := buf.String(); strings.Contains(out, "test-secret") || !strings.Contains(out, "tenant-a") {
+		t.Fatalf("log line = %s", out)
 	}
 }

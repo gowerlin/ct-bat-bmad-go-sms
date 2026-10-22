@@ -15,10 +15,174 @@
 | D008 | 2026-10-22 | T9004 以模式 ① 機械合併回 `main`（五條判準全過，塔台直接合併，不派合併工單） | T9004 |
 | D009 | 2026-10-22 | 限流：每 API key 一桶，容量＝租戶 `rate_limit_per_min`、每秒補 `rate_limit_per_min/60`；上限放租戶設定、預設 60（使用者決定） | T0005 |
 | D010 | 2026-10-22 | `Retry-After` 取 `max(1, ceil(秒數))`（使用者決定） | T0005 |
+| D011 | 2026-10-23 | CH5 紅燈骨架以每張工單一個 build tag（`red_queue`／`red_webhook`／`red_mitake`）commit，預設 `go test ./...` 維持綠；移除 tag 是各單驗收條件 | T0008、T0009、T0010 |
+| D012 | 2026-10-23 | `cmd/smsd/main.go` 由 T0008、T0010 刻意共改（5-08 衝突合併），T0009 之後接手；`e2e/testutil` 歸 T0008，T0009 在其後接續，T0010 不碰 | T0008、T0009、T0010 |
+| D013 | 2026-10-23 | 出站通知簽章：HMAC-SHA256、金鑰＝租戶 `CallbackSecret`、簽原始 body bytes、header `X-Signature: sha256=<小寫 hex>`，body 固定 `{"id","status"}`，本版不含時間戳／防重放 | T0009 |
+| D014 | 2026-10-23 | 三竹風格 send 的表單欄位與回應格式由塔台定案（假帳號、假端點）；statuscode 對應暫時／永久失敗與回呼格式留給 T0010 Worker 問塔台 | T0010 |
+| D015 | 2026-10-23 | 供應商回呼回應碼：造成狀態轉移回 204；重複或已終態回 200（照 AD-7），`openapi.yaml` 由 T0009 補 200 | T0009 |
+| D016 | 2026-10-23 | mitake `Send` 失敗類別：5xx／429／網路錯誤／明列 statuscode（t、u）→ 暫時；其他 4xx、其他非 1、200 無法解析 → 永久；ctx 錯誤同時包 `ErrTransient` | T0010 |
+| D017 | 2026-10-23 | mitake 回呼：表單 POST、header `X-Mitake-Secret` constant-time、密鑰鍵 `PROVIDER_CALLBACK_SECRET`（AD-18）；只接受 4→delivered、5／6／8→undelivered（AD-7），其他值包 `ErrPermanent` | T0010、T0009 |
+| D018 | 2026-10-23 | 共用契約的「未授權回呼」為選填：`mock` 不提供、`mitake` 必須提供；`mock` 回呼無驗證記為已知差距 | T0010 |
+| D019 | 2026-10-23 | mitake 位址設定鍵改用 AD-18 的 `PROVIDER_URL`（取代 `MITAKE_BASE_URL`）；帳密仍 `MITAKE_USERNAME`／`MITAKE_PASSWORD`，待回寫 spine | T0010 |
+| D020 | 2026-10-23 | `e2e/architecture_test.go` 納入 T0010：補 `provider/providertest` 節點與「只限 `_test.go`」的邊，不放寬其他規則（使用者決定） | T0010 |
+| D021 | 2026-10-23 | T0010 以模式 ① 機械合併回 `main`（五條判準全過，塔台直接合併，merge `1b0dabb`） | T0010 |
+| D022 | 2026-10-23 | T0008 以模式 ② 衝突解決合併回 `main`（合併工單 T0011，merge `abc1eba`，`main` = `7df6703`） | T0008、T0011 |
+| D023 | 2026-10-23 | T0009 收單 DONE：驗收「`grep -rn 'go:build red_' .` 無結果」依意圖判為 Go 原始碼沒有 `red_` tag（字面命中只在塔台文件與 gitignored 驗證暫存） | T0009 |
+| D024 | 2026-10-23 | `sprint-status.yaml` 以工單為 SoT 補同步：1-2～1-9、2-1～2-3 → `done`，epic-2 → `done`；1-1 無工單證據維持 `review`，epic-1 維持 `in-progress` | T0002～T0010 |
 
 ---
 
 ## 詳細紀錄（倒序）
+
+### D024 2026-10-23 — `sprint-status.yaml` 以工單為 SoT 補同步
+
+- **背景**：5-10 收尾照 CT 收單規則（`work-order-system.md` § 回報處理流程 第 2 步、§ sprint-status.yaml 同步）複查 `_bmad-output/implementation-artifacts/sprint-status.yaml`：自 CH5 起點 `f00fd8e` 起沒有更新過，除 1-1 為 `review` 外全部 `backlog`；但 T0002～T0010 都已 DONE。各單回報區〈sprint-status.yaml 已更新〉皆為「不適用」（T0008 明列不在範圍，由塔台收單時補）。
+- **選項**：
+  - [A] 以工單為 SoT，依 story 標題一對一補成 `done`；沒有工單證據的不動
+  - [B] 只補本次收單的 T0009（1-8）：其餘漂移留著，`sprint-status` 繼續失真
+  - [C] 不動，留給 `bmad-sprint-planning` 修復：本次不需要使用者決定，規則已指明塔台補
+- **決定**：選 A。對應：1-2 T0002、1-3 T0006、1-4 T0004、1-5 T0007、1-6／1-7 T0008、1-8 T0009、1-9 T0010、2-1／2-2 T0003、2-3 T0005 → `done`；epic-2 三個 story 皆 `done` → `done`。1-1（CH2 story 1）沒有工單、沒有 code review 紀錄，維持 `review`，epic-1 因此維持 `in-progress`。`last_updated` 改為 `10-23-2026 03:26`（取自系統，沿用檔案既有格式）。
+- **影響**：1-1 是否標 `done` 交使用者 → 使用者決定維持 `review`、不標 `done`；epic retrospective 仍 `optional`。使用者指示後與塔台私有檔一起 commit。
+- **相關工單**：T0002～T0010
+
+### D023 2026-10-23 — T0009 收單 DONE；`red_` tag 驗收依意圖判定
+
+- **背景**：T0009（主 checkout、不隔離、yolo）回報 DONE，產品 `b2166dd`、工單 `c7d2677`，無提問。〈遭遇問題〉1：驗收「`grep -rn 'go:build red_' .` 在整個 repo 沒有任何結果」字面仍有輸出，命中 (a) `_ct-workorders/` 的工單／決策日誌／塔台狀態引用這個指令的文字；(b) `_bmad-output/tmp/verify-T0008|T0010|T0011/`（`.gitignore` 排除）裡塔台先前乾淨匯出驗證留下的舊版 `e2e/*_test.go`。
+- **選項**：
+  - [A] 依意圖判定：條件要的是「三個紅燈 tag 都已從 Go 原始碼清掉」；`git grep -n 'go:build red_' -- '*.go'` exit `1`、`grep -rnE '^//go:build .*red_' e2e/` exit `1` 即成立
+  - [B] 字面判定 → `PARTIAL`：命中的是塔台自己的檔與暫存，Worker 依工單〈不做〉不得動，Renew 也無法讓它變綠
+- **決定**：選 A，判 DONE。塔台收單驗證：22 檔變更（`631bd91..c7d2677`）全部在 `affects_files`；主 checkout `go build`／`go vet` exit `0`、`gofmt -l` 空、`TestE2E_Webhook_*` 4 個 PASS、`go test ./... -race -count=1` exit `0`；`go.mod` 無 `require`、無 `t.Skip`、`internal/` 與 `e2e/` 非測試檔無 `time.Now(`／`time.Sleep(`、`internal/webhook` 無 `http.Client{`。Worker 自行取捨（只通知回呼造成的轉移、`GetByProviderRef` 只用 ref、`undelivered` reason 常數、Dispatcher 另建受限 client、`Deps.Callbacks` 選填）都在工單範圍內，照記錄接受。
+- **影響**：日後工單的同類驗收改寫成 `git grep -n 'go:build red_' -- '*.go'`；`_bmad-output/tmp/verify-*` 是 gitignored 暫存，暫不刪（列入 followups）。Worker 分頁 `--close-worker T0009 --delay-ms 10000` exit `0`（使用者指定延遲；`bat_list_terminals` 已 `alive: false`）。T0009 followups（`sent`／`failed` 也通知、24h 回呼逾時、`(provider_name, provider_ref)` 索引、簽章防重放、mock 回呼無驗證、`SMS_CONFIG` 載入、`cmd/smsd/provider.go` 過時註解）待開單。
+- **相關工單**：T0009
+
+### D022 2026-10-23 — T0008 以模式 ② 衝突解決合併回 `main`
+
+- **背景**：T0010 先合（D021）後，`--worktree-status T0008`（`source: git`）判準第 1 條（`behind 10`，`main` 多了 T0010 產品檔）與第 4 條（`conflicts ["cmd/smsd/main.go"]`）不成立；第 2、3、5 條成立（`head` = `validated_sha` = `9080685`、`outOfScopeFiles []`、`dirty []`）。
+- **選項**：
+  - [②] 衝突解決：衝突只有 D012 刻意留下的組裝行，git merge 解衝突即可
+  - [③] 等價移植：分支未過舊、無重構，不需要
+- **決定**：模式 ②，開合併工單 T0011（`base_main_sha` `1b0dabb`，整合 worktree `..\.ct-integration\sms-platform`），yolo 派出。Worker 回報 DONE：merge `abc1eba`（parent1 `1b0dabb`／parent2 `9080685`），`main.go` 兩邊都保留（`newProvider` 錯誤處理＋`queue.NewInProcess(st, queue.WithProvider(prov))`），驗收跑在 `abc1eba` 全綠、範圍外檔案無；塔台乾淨匯出獨立重驗全綠。SHA 比對 ①②③ 成立；⑤ `main` 因 T0011 工單 commit 前進到 `9ecabb1`，只動 `_ct-workorders/**` → 整合分支再 `--no-ff` 合 `main` 得 `7df6703`（產品樹同 `abc1eba`）；斷點 E（yolo、模式 ②、全綠＋無範圍外）自動 `--ff-only`；④ `main` = `7df6703`。
+- **影響**：整合 worktree detach；`--close-worker T0008 --worktree remove` exit `3` → 手動 `git worktree remove` exit `0`；使用者事先同意，`git branch -d ct/T0008 ct-merge/T0008` exit `0`；T0011 分頁 `--close-worker --delay-ms 10000` exit `0`。<個人規則>〈合併模式 ②〉證據已送 CT 塔台（`<CT 塔台>`）。merge commit 訊息含 git 自動的 `# Conflicts:` 兩行，未 amend。T0009 可在主 checkout 派出（本段未派）。
+- **相關工單**：T0008、T0011
+
+### D021 2026-10-23 — T0010 以模式 ① 機械合併回 `main`
+
+- **背景**：T0010（Renew #1）回報 DONE，`ct/T0010` 要先於 T0008 合併回 `main`（D012 合併順序）。照 `merge-workorder.md` 判準決定模式。
+- **判準**（`--worktree-status T0010`，`source: live`）：① `behind 7`，`800b7b4..0c5d01b` 只有 `_ct-workorders/T0008*`、`T0010*`（放寬版成立）；② `validated_sha` = `head` = `f6f00a5`；③ `outOfScopeFiles []`、`touchesCtWorkorders false`；④ `conflicts []`；⑤ `dirty []`，主 checkout 髒檔只有 `_decision-log.md`、`_tower-state.md`，與 13 個 `changedFiles` 不重疊。ff 前重查仍成立，`main` 未前進。
+- **決定**：模式 ①。整合 worktree `..\.ct-integration\sms-platform`（本匯出專案首次建立）開 `ct-merge/T0010` 自 `base_main_sha` `0c5d01b`，`--no-ff` 得 merge commit `1b0dabb`（parent1 `0c5d01b`、parent2 `f6f00a5`）；合併結果與 `head` 只差 `_ct-workorders/**`，不重跑驗收（塔台已於 `f6f00a5` 乾淨匯出重跑 `go test ./... -race -count=1` 全綠）。yolo 斷點 E 自動 `--ff-only`，`main` = `1b0dabb`。
+- **影響**：整合 worktree 已 `switch --detach`；`--close-worker T0010 --worktree remove` exit `3`（分頁已以 `keep` 關閉）→ 手動 `git worktree remove`（乾淨，exit `0`）；使用者事先同意，`git branch -d ct/T0010 ct-merge/T0010` exit `0`。T0008 合併時 `cmd/smsd/main.go` 預期衝突（D012）。
+- **相關工單**：T0010
+
+### D020 2026-10-23 — 架構守門圖補 `provider/providertest`，T0010 擴大範圍
+
+- **背景**：T0010 Worker 經 BAT 通道提問 Q-4（提問時間 2026-10-23T02:26:15+0800）：`TestArchitecture_ImportGraph` 必然擋下 AD-1 指定的 `provider/providertest`（不在 `allowedImports`；`mock_test.go`／`mitake_test.go` import 它也違規），但 `e2e/architecture_test.go` 不在 `affects_files`，工單〈不做〉也明列不改。塔台查證屬實；屬範圍變更，升級使用者。BAT 題在使用者回答前 `expired`（`not-polled`，Worker 輪詢間隔超過 120 s），Worker 走備援 `BLOCKED`。
+- **選項**：
+  - [A] 納入 `e2e/architecture_test.go`：新增節點 `"provider/providertest": {"provider"}`，另加「只限 `_test.go`」邊表（mock／mitake 的 `_test.go` 可 import），補測試驗證產品碼仍被擋
+  - [A+] 同 A，並修 `ForbiddenCalls`（允許 `cmd/smsd` 建 `http.Client`，其他地方連 `new(http.Client)` 也擋）
+  - [B] 直接加進 mock／mitake 允許清單（不分產品碼／測試碼）
+  - [C] 不改架構測試，契約放 `internal/provider` 本身（產品碼 import `testing`，偏離 AD-1）
+- **決定**：選 A（使用者決定，2026-10-23 於塔台分頁回覆「A」；塔台 2026-10-23T02:51:40+0800 寫入 T0010 `## 塔台補充（Renew #1）` 的 `塔台答覆 Q-4` 行，`renew_count` 1、狀態回 `PENDING`）。理由：AD-1 指定該節點，守門圖漏列，補齊不是放寬；只限 `_test.go` 讓 adapter 產品碼仍不能依賴測試工具。
+- **影響**：T0010 `affects_files` 加 `e2e/architecture_test.go`，〈不做〉該條加 Renew #1 例外註記。`ForbiddenCalls` 對 `cmd/smsd` 的矛盾（AD-9 要求在 `cmd/smsd` 建 client，守門測試連 `cmd/smsd` 都禁 `http.Client{`；T0010 以 `new(http.Client)` 繞過字面檢查）本輪不處理，列 followup。
+- **相關工單**：T0010
+
+### D019 2026-10-23 — mitake 位址設定鍵改用 `PROVIDER_URL`
+
+- **背景**：T0010 Worker 經 BAT 通道提問 Q-5（2026-10-23T02:27 前送出）：工單與 D014 寫 `MITAKE_BASE_URL`，SPINE AD-18 固定為 `PROVIDER_URL`；D017 已依 AD-18 定 `PROVIDER_CALLBACK_SECRET`。
+- **選項**：
+  - [A] 照工單與 D014：`MITAKE_BASE_URL`，差距記 followups
+  - [B] 照 AD-18：位址改 `PROVIDER_URL`；帳密仍 `MITAKE_USERNAME`、`MITAKE_PASSWORD`（AD-18 未列，記 followups）
+- **決定**：選 B（塔台代決，2026-10-23T02:27:42+0800 以 `--answer --choice 2` 經 BAT 通道答覆，exit `0`）。理由：與 D017 一致以 SPINE 為準；`MITAKE_BASE_URL` 是開單時塔台未對照 AD-18 的疏漏，修正成本只在本單的常數與文件。本條取代 D014 與 D017〈影響〉中對 `MITAKE_BASE_URL` 的寫法。
+- **影響**：`cmd/smsd/provider.go`、`provider_test.go`、`.env.example`、`docs/README.md`、mitake 註解用 `PROVIDER_URL`；`MITAKE_USERNAME`／`MITAKE_PASSWORD` 不在 AD-18 清單，待回寫 spine（followup）。
+- **相關工單**：T0010
+
+### D018 2026-10-23 — 共用契約的「未授權回呼」為選填
+
+- **背景**：T0010（yolo）Worker 經 BAT 通道提問 Q-3（提問時間 2026-10-23T02:23:55+0800）：共用契約要驗「回呼驗證失敗包 `ErrUnauthorized`」，但 `mock` 沒有回呼驗證、`mock.go` 不在 `affects_files`。
+- **選項**：
+  - [A] harness 的「未授權回呼」為選填：有提供才驗；`mock` 不提供，`mitake` 必須提供；共同必驗格式錯誤回錯誤、正確回呼解出非空 `ProviderRef` 與合法 `Status`
+  - [B] 擴大範圍，把 `mock.go` 加入本單、替 `mock` 加共用密鑰驗證（改 mock 回呼格式，影響 T0009 `CallbackSink`）
+- **決定**：選 A（塔台代決，2026-10-23T02:25:31+0800 以 `--answer --choice 1` 經 BAT 通道答覆，exit `0`，工單不寫答覆行）。理由：工單範圍內的技術選擇，不擴大範圍、不動 T0009 依賴的 `mock` 回呼格式；選填是 harness 明確宣告，不是 `t.Skip`。
+- **影響**：`mock` 回呼沒有驗證是 AD-7 的已知差距，記入 T0010 回報區與 followups，留給 T0009 或後續工單。
+- **相關工單**：T0010
+
+### D017 2026-10-23 — mitake 回呼格式、驗證與狀態對應
+
+- **背景**：T0010 Worker 經 BAT 通道提問 Q-2（提問時間 2026-10-23T02:23:55+0800），D014 已定此項須問塔台。Worker 建議 [A]（表單 POST、header 密鑰、設定鍵 `MITAKE_CALLBACK_SECRET`、`1`→`sent`、其他已知錯誤值→`failed`）。塔台比對 SPINE：AD-7「回呼只接受 `delivered`、`undelivered`，其他值回 400」、AD-18 環境變數固定含 `PROVIDER_CALLBACK_SECRET`，與 Worker 建議的兩處不一致。
+- **選項**：
+  - [A] Worker 建議原樣
+  - [B] 同 A，密鑰放表單欄位 `secret`
+  - [C] 同 A，改 `GET` query（密鑰進 URL，違背 D002 精神）
+  - [D] 以 A 為基礎、依 SPINE 修正狀態對應與設定鍵名
+- **決定**：選 D（塔台代決，2026-10-23T02:25:31+0800 經 BAT 通道答覆，不帶 `--choice`，exit `0`）：`POST`、`application/x-www-form-urlencoded`；`msgid`→`ProviderRef`、`statuscode`→`Status`、`donetime`（`yyyyMMddHHmmss`，`time.FixedZone("UTC+8", 8*60*60)`，不用 `LoadLocation` 以免 Windows 無 tzdata）→`ReceivedAt`，缺或壞用注入 `Now()`；header `X-Mitake-Secret` 以 `subtle.ConstantTimeCompare` 比對，缺或不符包 `ErrUnauthorized`；設定鍵 `PROVIDER_CALLBACK_SECRET`（`PROVIDER=mitake` 必填、不進日誌）；`4`→`delivered`，`5`／`6`／`8`→`undelivered`，其他值（含 `1`）回錯誤包 `ErrPermanent`。`Raw` = 表單 body。理由：SPINE 是架構權威；header 密鑰不進 URL（D002）；表單與 send 風格一致。
+- **影響**：T0009 回呼路由依此格式，非 `ErrUnauthorized` 的解析錯誤對應 400 `invalid_request`、`ErrUnauthorized` 對應 401。觀察到的既有差異（不在本題處理）：T0010 工單的 `MITAKE_BASE_URL`／`MITAKE_USERNAME`／`MITAKE_PASSWORD` 與 AD-18 的 `PROVIDER_URL` 不一致，屬開單時的塔台選擇，留待設定檔載入 story（AD-11）統一。
+- **相關工單**：T0010、T0009
+
+### D016 2026-10-23 — mitake `Send` 的失敗類別對應
+
+- **背景**：T0010 Worker 經 BAT 通道提問 Q-1（提問時間 2026-10-23T02:23:55+0800），D014 已定此項須問塔台。`provider.go` 寫「未分類錯誤視為 `ErrPermanent`」，裸 `ctx.Err()` 會讓 queue 把逾時當永久失敗。
+- **選項**：
+  - [A] HTTP 5xx、429、網路錯誤、明列模擬 statuscode（`t`、`u`）→ `ErrTransient`；其他 4xx、其他非 `1` statuscode、HTTP 200 無法解析 → `ErrPermanent`；ctx 取消／截止回 `ctx.Err()` 並同時包 `ErrTransient`
+  - [B] 同 A，但 200 無法解析 → `ErrTransient`（接受重複發送風險）
+  - [C] 同 A，但 ctx 錯誤照 mock 回裸 `ctx.Err()`
+- **決定**：選 A（塔台代決，2026-10-23T02:25:31+0800 以 `--answer --choice 1` 經 BAT 通道答覆，exit `0`）。理由：與 SPINE AD-1「逾時與連線錯誤歸 `ErrTransient`、未分類歸 `ErrPermanent`」一致；200 無法解析代表供應商可能已收件，不重試避免重複簡訊；ctx 錯誤同時保留兩個 sentinel，T0008 的 queue 不必寫特例。
+- **影響**：`mitake.go` 錯誤分類、`mitake_test.go`、`providertest` 暫時／永久案例、E2E 假對端的失敗回應；錯誤訊息只含類別與狀態碼，不含 `password`、號碼、內文。改對應表須開新決策取代本條。
+- **相關工單**：T0010
+
+### D015 2026-10-23 — 供應商回呼：造成轉移回 204，重複或已終態回 200
+
+- **背景**：使用者的紅燈骨架與 `docs/openapi.yaml` 都寫 `POST /v1/providers/{name}/callbacks` 成功回 204；epics AD-7 寫「終態或重複回呼回 200」。兩處在「重複回呼」上沒有矛盾，但 openapi 只列 204。
+- **選項**：
+  - [A] 第一次造成轉移回 204、重複或已終態回 200（AD-7 全保留，openapi 補一列 200）
+  - [B] 一律回 204（簡單，但偏離 AD-7）
+  - [C] 一律回 200（骨架與 openapi 的 204 要改）
+- **決定**：選 A，理由：骨架的 204 不用動，AD-7 與冪等語意（可由狀態碼區分「這次有效」與「重複」）同時成立；代價只是 openapi 補一列。
+- **影響**：T0009 實作依此；`docs/openapi.yaml` 補 200；未知供應商或查無 `provider_ref` 仍回 404（openapi 既有）；簽章／驗證失敗（`ErrUnauthorized`）回 401 信封，不計限流、不經 API key。
+- **相關工單**：T0009
+
+### D014 2026-10-23 — 三竹風格 send 的表單與回應：塔台定案；錯誤碼對應與回呼格式留給 T0010 問塔台
+
+- **背景**：T0010 要寫「三竹風格」HTTP adapter。公開文件的風格是表單 POST、純文字回應，但課程不連真實端點、全用假帳號，也不宣稱與真實服務逐欄一致；欄位名若留給 Worker 自行挑，E2E 假對端與 adapter 兩邊都是同一個 Worker 寫的，契約測試會變成自己驗自己。
+- **選項**：
+  - [A] 塔台現在定死 send 的欄位與回應，錯誤碼對應與回呼格式留給 Worker 提問
+  - [B] 全部現在定死
+  - [C] 全部留給 Worker 自行決定
+- **決定**：選 A。send 請求：`POST {MITAKE_BASE_URL}/SmSendPost.asp`，`Content-Type: application/x-www-form-urlencoded`，欄位 `username`、`password`、`dstaddr`（原樣用 `OutboundMessage.To`）、`smbody`、`CharsetURL=UTF-8`、`clientid`（用 `OutboundMessage.ID`）。成功回應 `text/plain`：第一行 `[1]`，其後 `msgid=<id>`、`statuscode=1`、`AccountPoint=<n>` 各一行；`ProviderRef` = `msgid`。**這是「風格」，不是真實規格**：文件與程式註解都要寫明為模擬、帳號密碼為假。留給 Worker 向塔台提問（`tower_question`）的兩項：(1) 非 `1` 的 `statuscode` 與 HTTP 5xx／逾時，哪些對應 `ErrTransient`、哪些對應 `ErrPermanent`；(2) 回呼（`ParseCallback`）收的請求格式、欄位名，以及怎麼對應 `DeliveryReport.Status`。
+- **影響**：T0010 的假對端與 adapter 照上述欄位；Q-1、Q-2 的答覆會寫進 D016（或之後的編號）。`http.Client` 只在 `cmd/smsd` 建立並注入（AD-9）。
+- **相關工單**：T0010
+
+### D013 2026-10-23 — 出站通知簽章編碼
+
+- **背景**：T0009 要對租戶 `callback_url` 發簽章通知；簽什麼、怎麼編碼、放哪個 header 不先定，租戶端的驗證範例（`docs/onboarding.md`）就沒有依據。
+- **選項**：
+  - [A] HMAC-SHA256，簽原始 body bytes，小寫 hex，header `X-Signature: sha256=<hex>`；金鑰為租戶 `CallbackSecret`；不含時間戳
+  - [B] 同 A，但簽 `<unix 時間戳>.<body>` 並多一個 `X-Timestamp` header（可防重放，租戶端驗證多一步）
+  - [C] base64 編碼
+- **決定**：選 A，理由：驗證只需「原始 body＋密鑰」，租戶端範例最短；hex 小寫無歧義、不需處理 padding；冪等已由 `(message_id, status)` 唯一約束保證「最多通知一次」，重放風險記入 followups，不在本版。比對一律 `hmac.Equal`（constant-time）。
+- **影響**：`tenant.Tenant` 新增 `CallbackSecret string`（不得出現在日誌與任何回應）；body 固定 `{"id","status"}`（AD-3）；測試用假密鑰 `test-secret`，不得使用真實密鑰；`docs/onboarding.md` 補驗證範例。要加時間戳須開新決策取代本條。
+- **相關工單**：T0009
+
+### D012 2026-10-23 — `cmd/smsd/main.go` 與 `e2e/testutil` 的歸屬
+
+- **背景**：T0008、T0010 平行（皆 `isolation: worktree`），使用者要在 5-08 練習衝突合併，刻意讓兩張都改 `main.go` 的組裝；`e2e/testutil` 則是共用夾具。
+- **選項**：
+  - [A] `main.go` 由 T0008 與 T0010 共改（刻意撞同一段組裝）；`testutil` 只歸 T0008，T0010 不碰，T0009 在兩張合回 `main` 後接續
+  - [B] 把 `main.go` 的組裝抽成新檔讓兩張不撞（違背使用者的教學目的）
+  - [C] 序列化 T0008→T0010（放棄並行示範）
+- **決定**：選 A。T0008 在 `main.go` 把 `prov` 傳給 queue（改 `queue.NewInProcess` 那行並刪掉「consumed by the queue workers from Story 1.6」註解）；T0010 把 `prov := mock.New()` 改成依 `PROVIDER` 選擇（`PROVIDER` 無預設，未設定或非法 → 啟動失敗）。兩邊都**不得**為對方預先留位置，也不得在自己的分支解對方的衝突。合併順序：先 T0010、後 T0008；衝突在合併 T0008 時出現，由使用者處理（5-08）。T0009 派在兩張都合回 `main` 之後，在主 checkout 接手 `main.go` 與 `testutil`。
+- **影響**：T0010 的 `affects_files` 不含 `e2e/testutil/*`；T0008 擁有 `testutil` 的改動（預設啟動 worker、`WithoutWorker()` 選項、FakeClock 等待同步）；`main.go` 是兩張的已知重疊（overlap check 預期 WARN，已由本條認可）。
+- **相關工單**：T0008、T0009、T0010
+
+### D011 2026-10-23 — CH5 紅燈骨架：每張工單一個 build tag 先 commit
+
+- **背景**：使用者手寫的三組紅燈骨架（`queue_retry_test.go`、`webhook_test.go`、`mitake_adapter_test.go`）還沒 commit。`isolation: worktree` 的分支從 HEAD 切出，未 commit 的檔案不會出現在 worktree；但直接 commit 紅燈測試會讓 `go test ./... -race` 紅，每張工單的收單門檻都過不了。AGENTS.md 禁止 `t.Skip`。
+- **選項**：
+  - [A] 先 commit，各檔首行加 build tag（`red_queue`／`red_webhook`／`red_mitake`）；預設不編譯、`go test ./...` 維持綠；工單把測試改成真實斷言並**移除自己的 tag** 才算完成
+  - [B] 原樣 commit，接受全套紅到三張都做完（T0008／T0010 的 `go test ./... -race` 驗收條件無法成立）
+  - [C] 不 commit，由 Worker 自行重建（worktree 看不到，使用者的教學骨架白做）
+  - [D] 用 `t.Skip` 暫時略過（違反 AGENTS.md Policy）
+- **決定**：選 A，理由：不改測試斷言與意圖、不用 `t.Skip`；紅燈可用 `go test ./e2e -tags 'red_queue red_webhook red_mitake' -run 'Queue|Webhook|Mitake'` 隨時重現（已驗證預設綠、帶 tag 四個測試皆紅）。tag 不是永久機制：各單驗收條件含「`grep -rn 'go:build red_' e2e/` 不再出現自己的 tag」，T0009 收單時整個 repo 不得殘留任何 `red_` tag。
+- **影響**：骨架的紅燈指令從 `go test ./e2e -run 'Queue|Webhook|Mitake'` 改為帶 `-tags`；build tag 檔案要和工單一起 commit，才能讓 worktree 看見。
+- **相關工單**：T0008、T0009、T0010
 
 ### D010 2026-10-22 — `Retry-After` 取 `max(1, ceil(秒數))`
 

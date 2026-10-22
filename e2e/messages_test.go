@@ -53,7 +53,7 @@ func submit(t *testing.T, env *testutil.Env) string {
 }
 
 func TestE2E_SendMessage_Returns202AndQueryable(t *testing.T) {
-	env := testutil.NewTestServer(t)
+	env := testutil.NewTestServer(t, testutil.WithoutWorker())
 
 	resp, body := send(t, env, `{"to":"+886900000001","body":"hi"}`)
 	if resp.StatusCode != http.StatusAccepted {
@@ -123,7 +123,7 @@ func TestE2E_SendMessage_RejectsInvalidRequests(t *testing.T) {
 }
 
 func TestE2E_SendMessage_QueueFullReturns503AndKeepsNothing(t *testing.T) {
-	env := testutil.NewTestServer(t)
+	env := testutil.NewTestServer(t, testutil.WithoutWorker())
 	for i := 0; i < queue.Capacity; i++ {
 		submit(t, env)
 	}
@@ -181,7 +181,7 @@ func TestE2E_Errors_UnroutedRequestsUseEnvelope(t *testing.T) {
 }
 
 func TestE2E_PurgeExpired_RemovesOnlyOldTerminalMessages(t *testing.T) {
-	env := testutil.NewTestServer(t)
+	env := testutil.NewTestServer(t, testutil.WithoutWorker())
 	done, open := submit(t, env), submit(t, env)
 
 	if _, err := env.Store.Transition(done, store.StatusQueued, store.StatusSending, store.Patch{}); err != nil {

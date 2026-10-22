@@ -39,6 +39,10 @@ services:
       - bat-server-sms-platform-data:/root/.local/share/bat-server
     # Shells and `docker exec` start in the Go module, not at the repo root.
     working_dir: /workspace/BMad-Guide/courses/ct-bat-bmad-go-sms/sms-platform
+    # smsd has no default provider (T0010): without this, `make run` inside
+    # the container fails at startup. mock never touches the network.
+    environment:
+      PROVIDER: mock
     # entrypoint / command / healthcheck come from bat-server:latest — do not
     # override them, or BAT's "Use existing" cannot read the token.
 

@@ -26,4 +26,7 @@ type Deps struct {
 	// satisfies it. nil turns limiting off: cmd/smsd and e2e/testutil always
 	// set it (NewHandler's required checks live in handler.go, outside T0005).
 	Limiter Limiter
+	// Callbacks applies supplier callbacks; *webhook.Inbound satisfies it.
+	// nil leaves POST /v1/providers/{name}/callbacks unregistered (404).
+	Callbacks Callbacks
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"sync"
 )
 
@@ -15,12 +16,21 @@ var ErrUnauthorized = errors.New("tenant: unauthorized")
 // Tenant is one customer of the platform.
 type Tenant struct {
 	ID string
-	// CallbackURL is where outbound status webhooks are sent (stored only;
-	// not used until the webhook stories).
+	// CallbackURL is where outbound status webhooks are sent; "" means the
+	// tenant gets no webhooks (nothing is enqueued for it).
 	CallbackURL string
+	// CallbackSecret is the HMAC-SHA256 key that signs those webhooks (D013).
+	// It must never appear in logs, responses or error messages.
+	CallbackSecret string
 	// RateLimitPerMin is the per-minute request limit for each of the tenant's
 	// API keys; <= 0 means unset, and ratelimit applies its default.
 	RateLimitPerMin int
+}
+
+// LogValue keeps CallbackSecret (and the URL) out of slog output when a
+// Tenant is logged whole.
+func (t Tenant) LogValue() slog.Value {
+	return slog.GroupValue(slog.String("tenant_id", t.ID))
 }
 
 // HashKey returns the SHA-256 hex digest of an API key. Only digests are ever
@@ -61,6 +71,44 @@ func (r *Registry) RateLimitPerMin(tenantID string) int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.tenants[tenantID].RateLimitPerMin
+}
+
+// Callback returns where and with which secret tenantID's webhooks go, or two
+// empty strings for an unknown tenant or one without a CallbackURL. Its
+// signature matches what webhook.Targets takes.
+func (r *Registry) Callback(tenantID string) (url, secret string) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	t := r.tenants[tenantID]
+	return t.CallbackURL, t.CallbackSecret
+}
+
+// SetCallback sets an existing tenant's webhook URL and secret. It reports
+// false when the tenant is unknown.
+func (r *Registry) SetCallback(tenantID, url, secret string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.tenants[tenantID]
+	if !ok {
+		return false
+	}
+	t.CallbackURL, t.CallbackSecret = url, secret
+	r.tenants[tenantID] = t
+	return true
+}
+
+// CallbackURLs returns every tenant's non-empty CallbackURL, for the outbound
+// allow-list built at startup (AD-9).
+func (r *Registry) CallbackURLs() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var out []string
+	for _, t := range r.tenants {
+		if t.CallbackURL != "" {
+			out = append(out, t.CallbackURL)
+		}
+	}
+	return out
 }
 
 // AddKey issues apiKey (stored as its hash) to an existing tenant. It reports

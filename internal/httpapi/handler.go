@@ -16,6 +16,7 @@ func NewHandler(deps Deps) http.Handler {
 	s.registerMessagesGet(mux)
 	s.registerMessagesList(mux)
 	s.registerTemplates(mux)
+	s.registerProviderCallbacks(mux)
 	return envelopeFallbacks(mux)
 }
 

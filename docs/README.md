@@ -9,6 +9,19 @@
 | `onboarding.md` | 租戶接入文件（含重啟限制 FR-28） | Story 1.1 起 |
 | 本檔 | 資料模型草案 ↔ Go 套件對照 | P1-c |
 
+## 執行設定：`PROVIDER`
+
+`smsd` 由環境變數 `PROVIDER` 選擇簡訊供應商 adapter（鍵名依 SPINE AD-18；範例見 repo 根目錄 `.env.example`）。**沒有預設值**：未設定、空字串或 `mock`／`mitake` 以外的值，`smsd` 在啟動時以 `slog` 記錄 `error_class` 與合法值後 exit `1`，不回顯任何環境變數的值。
+
+| `PROVIDER` | 另需設定 | 說明 |
+|---|---|---|
+| `mock` | 無 | 課程主線；不連網路，可注入故障（T0002） |
+| `mitake` | `PROVIDER_URL`、`MITAKE_USERNAME`、`MITAKE_PASSWORD`、`PROVIDER_CALLBACK_SECRET`（缺一即啟動失敗） | 三竹**風格**的模擬 HTTP adapter（D014、D016、D017）：不是真實規格，帳號密碼與密鑰都是假的，只連假對端，不連真實端點 |
+
+- 本機執行要帶 `PROVIDER`：`PROVIDER=mock make run`（`Makefile` 不設預設值）。dev container 的 `compose.yaml` 已設 `PROVIDER: mock`。
+- `mitake` 的密碼與回呼密鑰不得出現在日誌與錯誤訊息；供應商位址只經 `cmd/smsd` 建立的受限 `http.Client`（允許清單、不跟隨轉址，AD-9）連線。
+- `mitake` 的回呼：`POST`、`application/x-www-form-urlencoded`，欄位 `msgid`、`statuscode`（`4` → `delivered`；`5`／`6`／`8` → `undelivered`；其他值拒收）、`donetime`（`yyyyMMddHHmmss`，UTC+8），密鑰放 header `X-Mitake-Secret`（D017）。
+
 ## 資料模型草案（對照 COURSE-PLAN § 5.3）
 
 欄位只到足以規劃；定稿在 CH2 的 PRD／SPINE（`_bmad-output/planning-artifacts/`）。

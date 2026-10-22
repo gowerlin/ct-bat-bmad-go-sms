@@ -1,12 +1,16 @@
 // Package mock is the course-mainline SMS provider: it never talks to the
 // network and accepts every message unless a test injects a fault (transient
 // or permanent failure, timeout, delay; see the Fail*/Timeout/Delay methods).
+// With EmitCallbacks it also reports each accepted message delivered through
+// an injected CallbackSink instead of the network.
 package mock
 
 import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,9 +41,70 @@ type Provider struct {
 	remaining int // sends left to fail; < 0 means until Reset
 	delay     time.Duration
 	after     func(time.Duration) <-chan time.Time
+	callbacks *emitter // nil: Send emits no callbacks
 }
 
 var _ provider.Provider = (*Provider)(nil)
+
+// CallbackPath is the platform route the mock's callbacks are addressed to.
+const CallbackPath = "/v1/providers/" + Name + "/callbacks"
+
+// CallbackSink receives the callbacks the mock emits (AD-6): a form POST to
+// CallbackPath that ParseCallback accepts. cmd/smsd hands each one to the
+// platform handler, so a mock callback takes the same route and ParseCallback
+// as a supplier's HTTP callback.
+type CallbackSink func(ctx context.Context, r *http.Request)
+
+type emitter struct {
+	ctx   context.Context
+	sink  CallbackSink
+	wait  func(context.Context, time.Duration) error
+	delay time.Duration
+}
+
+// EmitCallbacks makes every later successful Send report delivered for its
+// ref to sink, from its own goroutine once wait(ctx, delay) returns, so the
+// queue has written sent before the callback arrives. wait must block for d
+// or until ctx ends; nil uses a real timer. ctx bounds every pending
+// callback. A nil sink turns emitting off.
+func (p *Provider) EmitCallbacks(ctx context.Context, sink CallbackSink, wait func(context.Context, time.Duration) error, delay time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if sink == nil {
+		p.callbacks = nil
+		return
+	}
+	if wait == nil {
+		wait = timerWait
+	}
+	p.callbacks = &emitter{ctx: ctx, sink: sink, wait: wait, delay: delay}
+}
+
+// timerWait is the default EmitCallbacks wait: a real timer that honours ctx.
+func timerWait(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// emit delivers one delivered callback for ref after the configured wait.
+func (e *emitter) emit(ref string) {
+	if err := e.wait(e.ctx, e.delay); err != nil {
+		return
+	}
+	form := url.Values{"ref": {ref}, "status": {string(provider.StatusDelivered)}}
+	r, err := http.NewRequestWithContext(e.ctx, http.MethodPost, CallbackPath, strings.NewReader(form.Encode()))
+	if err != nil {
+		return
+	}
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	e.sink(e.ctx, r)
+}
 
 // New returns a mock provider using the wall clock.
 func New() *Provider {
@@ -137,8 +202,15 @@ func (p *Provider) Send(ctx context.Context, msg provider.OutboundMessage) (prov
 		return provider.ProviderReceipt{}, ctx.Err()
 	}
 	n := p.seq.Add(1)
+	ref := fmt.Sprintf("mock-%d", n)
+	p.mu.Lock()
+	e := p.callbacks
+	p.mu.Unlock()
+	if e != nil {
+		go e.emit(ref)
+	}
 	return provider.ProviderReceipt{
-		ProviderRef: fmt.Sprintf("mock-%d", n),
+		ProviderRef: ref,
 		AcceptedAt:  p.now(),
 		Raw:         fmt.Sprintf(`{"id":%q,"to":%q,"accepted":true}`, msg.ID, msg.To),
 	}, nil

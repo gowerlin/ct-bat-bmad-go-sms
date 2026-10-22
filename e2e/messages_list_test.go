@@ -41,9 +41,9 @@ func sendAs(t *testing.T, env *testutil.Env, apiKey string) string {
 }
 
 // deliver moves a queued message through sending to sent or failed the way the
-// queue's send worker will: the FakeProvider's answer decides the outcome. The
-// queue has no send worker yet (D005), so the transitions go through
-// store.System directly.
+// queue's send worker does: the FakeProvider's answer decides the outcome.
+// Because the test runs WithoutWorker (some messages must stay queued), the
+// transitions go through store.System directly.
 func deliver(t *testing.T, env *testutil.Env, id string, providerErr error) {
 	t.Helper()
 	m, err := env.Store.GetByID(id)
@@ -100,7 +100,7 @@ func wantIDs(t *testing.T, got messageList, status string, want ...string) {
 }
 
 func TestE2E_ListMessages_FilterByStatus(t *testing.T) {
-	env := testutil.NewTestServer(t)
+	env := testutil.NewTestServer(t, testutil.WithoutWorker())
 
 	a1 := sendAs(t, env, testutil.KeyA)
 	b1 := sendAs(t, env, testutil.KeyB)

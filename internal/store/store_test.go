@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -350,5 +351,192 @@ func TestStatusValid(t *testing.T) {
 		if st.Valid() {
 			t.Fatalf("%q should be invalid", st)
 		}
+	}
+}
+
+// sent creates message id for tenant and moves it to sent with ref.
+func sent(t *testing.T, s *Memory, id, tenant, ref string) {
+	t.Helper()
+	create(t, s, id, tenant)
+	if _, err := s.Transition(id, StatusQueued, StatusSending, Patch{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Transition(id, StatusSending, StatusSent, Patch{Attempts: 1, ProviderRef: ref}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGetByProviderRef(t *testing.T) {
+	s, _ := newStore()
+	sent(t, s, "m1", "a", "ref-1")
+	create(t, s, "m2", "a")
+	m, err := s.GetByProviderRef("ref-1")
+	if err != nil || m.ID != "m1" {
+		t.Fatalf("ref-1: %+v %v", m, err)
+	}
+	for _, ref := range []string{"", "ref-2"} {
+		if _, err := s.GetByProviderRef(ref); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("ref %q: %v", ref, err)
+		}
+	}
+}
+
+func TestTransitionAndNotifyWritesBothOrNeither(t *testing.T) {
+	s, _ := newStore()
+	sent(t, s, "m", "a", "r")
+	if _, err := s.TransitionAndNotify("m", StatusSent, StatusUndelivered, Patch{}); !errors.Is(err, ErrIllegalTransition) {
+		t.Fatalf("undelivered without reason: %v", err)
+	}
+	if _, err := s.TransitionAndNotify("m", StatusSending, StatusSent, Patch{}); !errors.Is(err, ErrIllegalTransition) {
+		t.Fatalf("CAS mismatch: %v", err)
+	}
+	if got := s.Notifications("m"); len(got) != 0 {
+		t.Fatalf("failed transitions enqueued %+v", got)
+	}
+	m, err := s.TransitionAndNotify("m", StatusSent, StatusDelivered, Patch{})
+	if err != nil || m.Status != StatusDelivered {
+		t.Fatalf("delivered: %+v %v", m, err)
+	}
+	got := s.Notifications("m")
+	if len(got) != 1 || got[0].Status != StatusDelivered || got[0].TenantID != "a" || got[0].State != NotificationPending {
+		t.Fatalf("outbox = %+v", got)
+	}
+	if s.OutboxIdle() {
+		t.Fatal("OutboxIdle with a pending entry")
+	}
+}
+
+func TestTransitionWithoutNotifyEnqueuesNothing(t *testing.T) {
+	s, _ := newStore()
+	sent(t, s, "m", "a", "r")
+	if _, err := s.Transition("m", StatusSent, StatusDelivered, Patch{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Notifications("m"); len(got) != 0 || !s.OutboxIdle() {
+		t.Fatalf("outbox = %+v", got)
+	}
+}
+
+// Duplicate callbacks race on the same CAS: one transition and one outbox
+// entry, whatever the interleaving (AD-3).
+func TestConcurrentTransitionAndNotifyEnqueuesOnce(t *testing.T) {
+	s, _ := newStore()
+	sent(t, s, "m", "a", "r")
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	wins := 0
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := s.TransitionAndNotify("m", StatusSent, StatusDelivered, Patch{}); err == nil {
+				mu.Lock()
+				wins++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if got := s.Notifications("m"); wins != 1 || len(got) != 1 {
+		t.Fatalf("wins = %d, outbox = %+v", wins, got)
+	}
+}
+
+func TestClaimNextInOrderAndFinish(t *testing.T) {
+	s, _ := newStore()
+	sent(t, s, "m1", "a", "r1")
+	sent(t, s, "m2", "b", "r2")
+	if _, err := s.TransitionAndNotify("m2", StatusSent, StatusDelivered, Patch{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.TransitionAndNotify("m1", StatusSent, StatusUndelivered, Patch{FailureReason: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	first, err := s.ClaimNext(ctx)
+	if err != nil || first.MessageID != "m2" || first.State != NotificationDelivering {
+		t.Fatalf("first claim: %+v %v", first, err)
+	}
+	second, err := s.ClaimNext(ctx)
+	if err != nil || second.MessageID != "m1" || second.Status != StatusUndelivered {
+		t.Fatalf("second claim: %+v %v", second, err)
+	}
+	if err := s.FinishNotification(first.Seq, NotificationPending); !errors.Is(err, ErrIllegalTransition) {
+		t.Fatalf("finish as pending: %v", err)
+	}
+	if err := s.FinishNotification(first.Seq, NotificationDone); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishNotification(first.Seq, NotificationAbandoned); !errors.Is(err, ErrIllegalTransition) {
+		t.Fatalf("finish twice: %v", err)
+	}
+	if err := s.FinishNotification(99, NotificationDone); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown seq: %v", err)
+	}
+	if s.OutboxIdle() {
+		t.Fatal("OutboxIdle while m1's entry is delivering")
+	}
+	if err := s.FinishNotification(second.Seq, NotificationAbandoned); err != nil {
+		t.Fatal(err)
+	}
+	if !s.OutboxIdle() {
+		t.Fatal("OutboxIdle false after every entry finished")
+	}
+	if got := s.Notifications("m2"); got[0].State != NotificationDone {
+		t.Fatalf("m2 outbox = %+v", got)
+	}
+}
+
+func TestClaimNextBlocksUntilEnqueuedOrCancelled(t *testing.T) {
+	s, _ := newStore()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := s.ClaimNext(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled claim: %v", err)
+	}
+
+	sent(t, s, "m", "a", "r")
+	got := make(chan Notification, 1)
+	go func() {
+		n, err := s.ClaimNext(context.Background())
+		if err != nil {
+			t.Error(err)
+		}
+		got <- n
+	}()
+	if _, err := s.TransitionAndNotify("m", StatusSent, StatusDelivered, Patch{}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case n := <-got:
+		if n.MessageID != "m" {
+			t.Fatalf("claimed %+v", n)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("ClaimNext did not wake up on enqueue")
+	}
+}
+
+func TestPurgeExpiredDropsFinishedNotifications(t *testing.T) {
+	s, c := newStore()
+	sent(t, s, "m", "a", "r")
+	if _, err := s.TransitionAndNotify("m", StatusSent, StatusDelivered, Patch{}); err != nil {
+		t.Fatal(err)
+	}
+	c.t = c.t.Add(Retention + time.Second)
+	s.PurgeExpired(c.t)
+	if got := s.Notifications("m"); len(got) != 1 {
+		t.Fatalf("pending entry purged with its message: %+v", got)
+	}
+	n, err := s.ClaimNext(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishNotification(n.Seq, NotificationDone); err != nil {
+		t.Fatal(err)
+	}
+	s.PurgeExpired(c.t)
+	if got := s.Notifications("m"); len(got) != 0 {
+		t.Fatalf("finished entry kept after purge: %+v", got)
 	}
 }
