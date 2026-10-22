@@ -53,8 +53,25 @@ func TestWriteErrorUnknownIs500FixedMessage(t *testing.T) {
 func TestNewHandlerRequiresDeps(t *testing.T) {
 	defer func() {
 		if recover() == nil {
-			t.Fatal("expected panic for missing Queue/Store")
+			t.Fatal("expected panic for missing Queue/Store/Tenants")
 		}
 	}()
 	NewHandler(Deps{})
+}
+
+func TestWriteErrorUnauthorizedIs401Envelope(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeError(rec, errUnauthorized)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var got struct {
+		Error struct{ Code, Message string }
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Error.Code != "unauthorized" || got.Error.Message == "" {
+		t.Fatalf("envelope = %+v", got)
+	}
 }

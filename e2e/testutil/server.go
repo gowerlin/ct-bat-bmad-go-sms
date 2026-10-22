@@ -13,6 +13,15 @@ import (
 	"example.com/sms-platform/internal/httpapi"
 	"example.com/sms-platform/internal/queue"
 	"example.com/sms-platform/internal/store"
+	"example.com/sms-platform/internal/tenant"
+)
+
+// Fake API keys and tenant IDs registered by NewTestServer.
+const (
+	TenantA = "tenant-a"
+	TenantB = "tenant-b"
+	KeyA    = "test-key-tenant-a"
+	KeyB    = "test-key-tenant-b"
 )
 
 // Env is one running test server plus the fakes wired into it.
@@ -23,6 +32,8 @@ type Env struct {
 	Provider *FakeProvider
 	Store    *store.Memory
 	Queue    queue.Queue
+	// Tenants is the registry behind the handler; tests may add or disable keys.
+	Tenants *tenant.Registry
 }
 
 // NewTestServer starts the platform handler (the same one cmd/smsd serves)
@@ -33,10 +44,15 @@ func NewTestServer(t testing.TB) *Env {
 	prov := NewFakeProvider(clock.Now)
 	st := store.New(clock.Now)
 	q := queue.NewInProcess(st)
-	h := httpapi.NewHandler(httpapi.Deps{Now: clock.Now, Queue: q, Store: st})
+	reg := tenant.NewRegistry()
+	for id, key := range map[string]string{TenantA: KeyA, TenantB: KeyB} {
+		reg.AddTenant(tenant.Tenant{ID: id})
+		reg.AddKey(id, key)
+	}
+	h := httpapi.NewHandler(httpapi.Deps{Now: clock.Now, Queue: q, Store: st, Tenants: reg})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &Env{Server: srv, Client: srv.Client(), Clock: clock, Provider: prov, Store: st, Queue: q}
+	return &Env{Server: srv, Client: srv.Client(), Clock: clock, Provider: prov, Store: st, Queue: q, Tenants: reg}
 }
 
 // URL joins the server base URL with path.
@@ -44,10 +60,11 @@ func (e *Env) URL(path string) string {
 	return e.Server.URL + "/" + strings.TrimPrefix(path, "/")
 }
 
-// Get performs a GET and returns the response with its body fully read.
+// Get performs a GET as tenant A (KeyA) and returns the response with its body
+// fully read.
 func (e *Env) Get(t testing.TB, path string) (*http.Response, []byte) {
 	t.Helper()
-	return e.Do(t, http.MethodGet, path, "", nil)
+	return e.Do(t, http.MethodGet, path, KeyA, nil)
 }
 
 // Do performs a request with an optional JSON body and reads the response.

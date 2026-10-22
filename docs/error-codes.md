@@ -12,7 +12,7 @@
 |---|---|---|---|
 | 400 | `invalid_request` | 缺必填欄位、號碼非 `^\+[1-9]\d{1,14}$`、內容超過 70 個 Unicode code point、JSON 無效、非法 `status` 篩選、回呼帶 `delivered`／`undelivered` 以外的值、405 方法不符（帶 `Allow`） | 是（除篩選與回呼） |
 | 400 | `invalid_template` | 模板無法解析 | 否 |
-| 401 | `unauthorized` | 缺、無效或停用 `X-API-Key`；Provider 回呼驗證失敗 | 否 |
+| 401 | `unauthorized` | 缺、無效或停用 `X-API-Key`；Provider 回呼驗證失敗 | 是 |
 | 404 | `not_found` | 訊息、模板、回呼對應不到；跨租戶存取（不用 403）；未知路徑；重啟或過期（終態滿 24 小時）後的訊息 | 是 |
 | 422 | `missing_template_variable` | 帶 `template_id` 缺變數 | 否 |
 | 429 | `rate_limited` | 超過 API key 每分鐘上限，帶 `Retry-After` | 否 |

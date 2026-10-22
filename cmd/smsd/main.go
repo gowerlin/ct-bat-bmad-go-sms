@@ -18,6 +18,7 @@ import (
 	"example.com/sms-platform/internal/provider/mock"
 	"example.com/sms-platform/internal/queue"
 	"example.com/sms-platform/internal/store"
+	"example.com/sms-platform/internal/tenant"
 )
 
 const (
@@ -52,7 +53,10 @@ func main() {
 	st := store.New(time.Now)
 	q := queue.NewInProcess(st)
 	prov := mock.New() // consumed by the queue workers from Story 1.6
-	h := httpapi.NewHandler(httpapi.Deps{Now: time.Now, Queue: q, Store: st})
+	// TEMPORARY: the registry is empty, so every /v1/* request gets 401 until
+	// config-file loading of tenants and API keys lands (a later story).
+	tenants := tenant.NewRegistry()
+	h := httpapi.NewHandler(httpapi.Deps{Now: time.Now, Queue: q, Store: st, Tenants: tenants})
 
 	go func() { _ = q.Run(ctx) }()
 	go purgeLoop(ctx, st)

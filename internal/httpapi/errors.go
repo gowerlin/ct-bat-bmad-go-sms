@@ -20,6 +20,9 @@ func invalid(format string, args ...any) error {
 	return &invalidError{msg: fmt.Sprintf(format, args...)}
 }
 
+// errUnauthorized is a missing, invalid or disabled API key.
+var errUnauthorized = errors.New("httpapi: unauthorized")
+
 const internalMessage = "internal error"
 
 // writeError is the only place an error envelope is produced (AD-8).
@@ -29,6 +32,8 @@ func writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.As(err, &inv):
 		status, code, msg = http.StatusBadRequest, "invalid_request", inv.msg
+	case errors.Is(err, errUnauthorized):
+		status, code, msg = http.StatusUnauthorized, "unauthorized", "missing or invalid API key"
 	case errors.Is(err, store.ErrNotFound):
 		status, code, msg = http.StatusNotFound, "not_found", "not found"
 	case errors.Is(err, queue.ErrQueueFull):

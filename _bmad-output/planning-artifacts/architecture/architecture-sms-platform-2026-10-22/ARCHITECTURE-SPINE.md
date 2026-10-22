@@ -156,6 +156,8 @@ graph TD
 - **Binds:** all
 - **Prevents:** 各單元各自引入不同的路由、日誌、斷言函式庫。
 - **Rule:** 一律用標準庫（`net/http` 的 `ServeMux` 方法路由、`encoding/json`、`log/slog`、`crypto/hmac`、`crypto/sha256`、`net/http/httptest`）。`go.mod` 不得出現 `require`。要加依賴須先修訂本 spine。
+  路由寫法：用 Go 1.22+ 的「方法＋路徑」註冊（如 `GET /v1/messages/{id}`），路徑參數以 `r.PathValue("id")` 取得。中介層以 `func(http.Handler) http.Handler` 串接，可有小型 `chain` helper。採單一 mux，`/v1` 的每條路由各自包驗證與限流（`mux.Handle(…, v1(h))`）；`/healthz` 不包。不用子 mux 掛 `/v1/`：未帶 key 的未知路徑與錯方法會回 401 而非 404／405，與 AD-8 的信封行為不一致。404／405 攔截見 AD-8。
+- **Source:** D003、EXP-ROUTER-001。方案 A（標準庫）已實測：7 條路由皆可直接表達，中介層串接約 17 行（單一 mux，各路由包 `v1(...)`），子 mux 掛載約 10 行（不採）。方案 B（chi）未實測，只是紙上對照，本決策不依賴 B 的數字。日後出現多層版本前綴或每群組不同中介層組合，再開新 EXP；要引入 router 須新決策取代 D003。
 
 ### AD-18 — 單程序單副本，建置與設定入口固定
 

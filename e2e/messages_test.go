@@ -22,7 +22,7 @@ type envelope struct {
 
 func send(t *testing.T, env *testutil.Env, body string) (*http.Response, []byte) {
 	t.Helper()
-	return env.Do(t, http.MethodPost, "/v1/messages", "", strings.NewReader(body))
+	return env.Do(t, http.MethodPost, "/v1/messages", testutil.KeyA, strings.NewReader(body))
 }
 
 func wantEnvelope(t *testing.T, resp *http.Response, body []byte, status int, code string) {
@@ -167,13 +167,13 @@ func TestE2E_Errors_UnroutedRequestsUseEnvelope(t *testing.T) {
 	resp, body := env.Get(t, "/nope")
 	wantEnvelope(t, resp, body, http.StatusNotFound, "not_found")
 
-	resp, body = env.Do(t, http.MethodDelete, "/v1/messages", "", nil)
+	resp, body = env.Do(t, http.MethodDelete, "/v1/messages", testutil.KeyA, nil)
 	wantEnvelope(t, resp, body, http.StatusMethodNotAllowed, "invalid_request")
 	if allow := resp.Header.Get("Allow"); !strings.Contains(allow, "POST") {
 		t.Fatalf("Allow = %q, want it to list POST", allow)
 	}
 
-	resp, body = env.Do(t, http.MethodPost, "/healthz", "", nil)
+	resp, body = env.Do(t, http.MethodPost, "/healthz", testutil.KeyA, nil)
 	wantEnvelope(t, resp, body, http.StatusMethodNotAllowed, "invalid_request")
 	if allow := resp.Header.Get("Allow"); !strings.Contains(allow, "GET") {
 		t.Fatalf("Allow = %q, want it to list GET", allow)
