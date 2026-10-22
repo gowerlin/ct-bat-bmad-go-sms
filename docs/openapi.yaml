@@ -1,15 +1,22 @@
-# sms-platform API — OpenAPI shell (COURSE-PLAN § 5.4).
-# T0193 (P1-c) lists the routes only; request/response schemas are TODO and
-# are filled by the work order that implements each route. CH5 finalises it.
+# sms-platform API — OpenAPI 完稿（COURSE-PLAN § 5.4；P1-c 空殼 → CH6 完稿）。
+# 以 internal/httpapi 的路由註冊與錯誤對應、e2e/ 的 TestE2E_* 為準；每個 operation 的
+# x-e2e 列出驗證它的 E2E 測試名。錯誤碼清單的權威是 docs/error-codes.md。
 openapi: 3.1.0
 info:
   title: sms-platform API
-  version: 0.0.1-skeleton
+  version: 1.0.0
   description: |
-    SMS 通訊平台（課程示範專案）。錯誤格式一律
-    `{"error":{"code":"…","message":"…"}}`；401 無 API key、404 跨租戶、
-    422 模板缺變數、429 限流（含 `Retry-After`）。
-    租戶以 header `X-API-Key` 認證。
+    SMS 通訊平台（課程示範專案）。
+
+    - 認證：header `X-API-Key`（D002）；query 帶 key 視為沒帶。`/healthz` 與供應商回呼不經 API key。
+    - 中介層順序固定為 authenticate → rateLimit → handler（AD-10）：無效 key 一律先回 401，不消耗限流額度。
+    - 錯誤一律回信封 `{"error":{"code":"…","message":"…"}}`，`code` 見 `docs/error-codes.md`；
+      錯誤訊息不回顯收件號碼、簡訊內容與 API key。
+    - 所有路徑共通：未路由的路徑回 404 `not_found`；方法不符回 405 `invalid_request` 並帶 `Allow`；
+      未預期的錯誤回 500 `internal_error`（message 固定 `internal error`）。
+    - 請求 body 上限 1 MiB（回呼 64 KiB），超過視為 JSON 無效（400 `invalid_request`）。
+  x-e2e:
+    - TestE2E_Errors_UnroutedRequestsUseEnvelope   # 404／405 信封與 Allow（所有路徑共通）
 servers:
   - url: http://127.0.0.1:8080
     description: local smsd (`make run`)
@@ -20,6 +27,7 @@ paths:
       summary: 健康檢查（CH1，T0001）
       operationId: healthz
       security: []
+      x-e2e: [TestE2E_Healthz]
       responses:
         "200":
           description: 服務存活
@@ -35,8 +43,17 @@ paths:
 
   /v1/messages:
     post:
-      summary: 送出訊息（CH2；202＋id；可帶 template_id＋vars）
+      summary: 送出訊息（CH2；202＋id；可改帶 template_id＋vars，CH4 T0004／T0007）
       operationId: sendMessage
+      x-e2e:
+        - TestE2E_SendMessage_Returns202AndQueryable
+        - TestE2E_Auth_MissingKey401
+        - TestE2E_SendMessage_RejectsInvalidRequests
+        - TestE2E_SendMessage_QueueFullReturns503AndKeepsNothing
+        - TestE2E_SendMessage_AfterCloseReturns503
+        - TestE2E_Template_RendersVariables
+        - TestE2E_Template_MissingVariableReturns422
+        - TestE2E_RateLimit_Returns429WithRetryAfter
       requestBody:
         required: true
         content:
@@ -50,13 +67,18 @@ paths:
               schema: { $ref: "#/components/schemas/SendMessageResponse" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "404": { $ref: "#/components/responses/NotFound" }
-        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "404":
+          description: not_found：template_id 不存在或屬於其他租戶
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422": { $ref: "#/components/responses/MissingTemplateVariable" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
         "503": { $ref: "#/components/responses/QueueFull" }
     get:
       summary: 列表與篩選（CH4，T0006；`?status=`；本租戶的訊息，依 (created_at, id) 新到舊）
       operationId: listMessages
+      x-e2e: [TestE2E_ListMessages_FilterByStatus]
       parameters:
         - name: status
           in: query
@@ -88,11 +110,21 @@ paths:
               schema: { $ref: "#/components/schemas/MessageList" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /v1/messages/{id}:
     get:
       summary: 查單筆狀態（CH2）
       operationId: getMessage
+      x-e2e:
+        - TestE2E_SendMessage_Returns202AndQueryable
+        - TestE2E_Auth_MissingKey401
+        - TestE2E_GetMessage_UnknownIsNotFound
+        - TestE2E_GetMessage_AfterRestartIsNotFound
+        - TestE2E_PurgeExpired_RemovesOnlyOldTerminalMessages
+        - TestE2E_Tenant_IsolationReturns404
+        - TestE2E_Queue_RetriesThenSucceeds
+        - TestE2E_Queue_ExhaustsRetriesMarksFailed
       parameters:
         - $ref: "#/components/parameters/Id"
       responses:
@@ -102,12 +134,20 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Message" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "404": { $ref: "#/components/responses/NotFound" }
+        "404":
+          description: >-
+            not_found：不存在、屬於其他租戶（不用 403）、平台重啟後（in-memory store），
+            或終態滿 24 小時已被清除
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /v1/templates:
     post:
       summary: 建立模板（CH4，T0004）
       operationId: createTemplate
+      x-e2e: [TestE2E_Template_RejectsInvalidRequests, TestE2E_Template_RendersVariables]
       requestBody:
         required: true
         content:
@@ -121,9 +161,11 @@ paths:
               schema: { $ref: "#/components/schemas/Template" }
         "400": { $ref: "#/components/responses/InvalidTemplate" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
     get:
       summary: 列出模板（CH4，T0004；本租戶的模板，新到舊，不分頁）
       operationId: listTemplates
+      x-e2e: [TestE2E_Template_RejectsInvalidRequests]
       responses:
         "200":
           description: 本租戶的模板
@@ -131,11 +173,13 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/TemplateList" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /v1/templates/{id}:
     get:
       summary: 讀取模板（CH4，T0004）
       operationId: getTemplate
+      x-e2e: [TestE2E_Template_RejectsInvalidRequests]
       parameters:
         - $ref: "#/components/parameters/Id"
       responses:
@@ -146,9 +190,11 @@ paths:
               schema: { $ref: "#/components/schemas/Template" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
     delete:
       summary: 刪除模板（CH4，T0004）
       operationId: deleteTemplate
+      x-e2e: [TestE2E_Template_RejectsInvalidRequests]
       parameters:
         - $ref: "#/components/parameters/Id"
       responses:
@@ -156,19 +202,29 @@ paths:
           description: 已刪除
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /v1/providers/{name}/callbacks:
     post:
       summary: 供應商狀態回呼（CH5，T0009）
       operationId: providerCallback
       security: []
+      x-e2e:
+        - TestE2E_Webhook_DeliveredUpdatesStatusAndNotifiesTenantOnce
+        - TestE2E_Webhook_UnknownProviderReturns404
+        - TestE2E_Webhook_UnauthorizedCallbackReturns401
+        - TestE2E_Webhook_UnknownProviderRefReturns404
+        - TestE2E_MitakeAdapter_ContractAgainstFakeServer
       parameters:
         - name: name
           in: path
           required: true
+          description: >-
+            目前啟用的供應商名稱（smsd 以環境變數 PROVIDER 選定，mock 或 mitake）；
+            不是啟用中的供應商回 404 not_found
           schema:
             type: string
-            enum: [mock, mitake]
+            examples: [mock, mitake]
       description: >-
         供應商回報送達結果。不經 API key、不計限流；驗證由該供應商的 ParseCallback 負責
         （共用密鑰、constant-time）。以 provider_ref 找到 sent 的訊息並轉為 delivered／undelivered，
@@ -179,7 +235,7 @@ paths:
           格式由各供應商的 ParseCallback 定義。mock：表單或 query `ref=<provider_ref>&status=delivered|undelivered`
           （status 省略視為 delivered，無驗證，只供本機示範）。mitake（模擬，非真實規格）：
           `application/x-www-form-urlencoded` 的 `msgid`、`statuscode`、選填 `donetime`，
-          並以 header `X-Mitake-Secret` 帶 PROVIDER_CALLBACK_SECRET（D017）。
+          並以 header `X-Mitake-Secret` 帶 PROVIDER_CALLBACK_SECRET（D017）。body 上限 64 KiB。
         content:
           application/x-www-form-urlencoded:
             schema: { type: object }
@@ -211,6 +267,7 @@ paths:
 #   body: {"id":"msg_…","status":"delivered"}   # 固定兩個欄位，見 components.schemas.WebhookNotification
 # 租戶回 2xx 即完成；否則退避 1s、2s、4s 重試，共 4 次，用盡只記日誌、不改訊息狀態。
 # 同一訊息的通知依產生順序送出。驗證範例見 docs/onboarding.md。
+# 佇列送信轉成 sent／failed 時不通知租戶（D023；epic 1 回顧 F2 待決定）。
 
 components:
   securitySchemes:
@@ -229,7 +286,7 @@ components:
     BadRequest:
       description: >-
         invalid_request：欄位缺漏、號碼非 E.164、內容（直接或模板渲染後）超過 70 code point、
-        body 與 template_id 同時給或都沒給、vars 不是字串值的物件、JSON 無效；405 方法不符亦用 invalid_request 並帶 Allow
+        body 與 template_id 同時給或都沒給、vars 不是字串值的物件、JSON 無效、列表的 status／limit／cursor 不合法
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -240,23 +297,41 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    MissingTemplateVariable:
+      description: missing_template_variable：帶 template_id 但 vars 缺少佔位符的值；message 列出缺少的變數名稱
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     QueueFull:
-      description: 佇列滿載（queue_full），不建立訊息
+      description: >-
+        queue_full：佇列滿載（容量 1000），不建立訊息；關機中（queue 已關閉）同樣回 queue_full，
+        message 為 `service shutting down`
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     Unauthorized:
-      description: 無或錯誤的 API key
+      description: unauthorized：缺少、無效或停用的 API key（message 固定 `missing or invalid API key`）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     NotFound:
-      description: 不存在或屬於其他租戶
-    UnprocessableEntity:
-      description: 模板缺變數等驗證錯誤
+      description: not_found：不存在或屬於其他租戶（不用 403）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     TooManyRequests:
-      description: 超過租戶速率限制
+      description: >-
+        rate_limited：每個 API key 一個 token bucket，容量為所屬租戶的每分鐘上限（預設 60，D009）；
+        所有 /v1 認證路由共用同一個 bucket
       headers:
         Retry-After:
+          description: 距離下一個可用額度的整數秒數，至少 1
           schema:
             type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
   schemas:
     Error:
       type: object
@@ -266,7 +341,10 @@ components:
           type: object
           required: [code, message]
           properties:
-            code: { type: string, description: 見 docs/error-codes.md }
+            code:
+              type: string
+              enum: [invalid_request, invalid_template, unauthorized, not_found, missing_template_variable, rate_limited, internal_error, queue_full]
+              description: 見 docs/error-codes.md
             message: { type: string }
     WebhookNotification:
       type: object
@@ -309,14 +387,16 @@ components:
           description: 已呼叫供應商 Send 的次數（成功那次也算），與 sent／failed 轉移同時寫入，之前為 0；最多 4 次（首次＋重試 3 次，退避 1s、2s、4s）
         failure_reason:
           type: string
-          description: 只在 failed／undelivered 出現：「重試用盡」、「永久失敗」、「供應商回報未送達」或「回呼逾時」；不含收件號碼與簡訊內容
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
+          description: >-
+            只在 failed／undelivered 出現：「重試用盡」、「永久失敗」（failed，queue）或「供應商回報未送達」
+            （undelivered，webhook）；不含收件號碼與簡訊內容。回呼逾時轉 undelivered 尚未實作（epic 1 回顧 F4）
+        created_at: { type: string, format: date-time, description: UTC，RFC 3339 到秒 }
+        updated_at: { type: string, format: date-time, description: UTC，RFC 3339 到秒 }
     TemplateRequest:
       type: object
       required: [name, body]
       properties:
-        name: { type: string }
+        name: { type: string, description: 不可為空白 }
         body:
           type: string
           description: "含 {{name}} 佔位符；name 為字母或底線開頭，其後字母、數字、底線；括號內前後空白忽略"
@@ -327,7 +407,7 @@ components:
         id: { type: string, description: "tpl_ 加 128 位元 hex" }
         name: { type: string }
         body: { type: string }
-        created_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time, description: UTC，RFC 3339 到秒 }
     TemplateList:
       type: object
       required: [templates]
@@ -345,7 +425,6 @@ components:
         next_cursor:
           type: string
           description: 不透明字串（AD-14），帶入下一次請求的 cursor；最後一頁省略
-    # TODO（後續 Story 補）: DeliveryReport, OutboundNotification。
 
 security:
   - ApiKey: []

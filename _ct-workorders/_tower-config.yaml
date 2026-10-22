@@ -1,2 +1,4 @@
 control-tower:
   enable_experiments: true
+
+gp-prefix: SMS

@@ -1,9 +1,10 @@
 # 塔台狀態快照 _tower-state.md
 
 ## 🌅 起手式（Quick Recovery）
-> 最後更新：2026-10-23T03:26:04+0800（取自系統）
+> 最後更新：2026-10-23T07:20:00+0800（取自系統）
 
 ### 立即待辦
+00. **epic 1 回顧 F1／F10 已開單、尚未派**（2026-10-23T07:13+0800，D025～D026）：**T0012**（`SMS_CONFIG` 載入＋組裝函式，PENDING，先派）→ **T0013**（`cmd/smsd/main_test.go`，PENDING，`depends_on: T0012`，T0012 合回 `main` 後再派）；兩張都動 `cmd/smsd/main.go`，不得並行；皆主 checkout 不隔離 yolo。回顧其餘 action item（2～5、7～9）尚未開單，等使用者決定。派 T0012 前提示使用者：目前 `/v1/*` 全回 401 的 followup（待辦 4、0c 的 `SMS_CONFIG`）由 T0012 收掉
 0. **5-04＋5-10 完成：T0009 DONE（`main` = `c7d2677`），CH5 三張功能單全部合回 `main`**。主 checkout `go test ./... -race -count=1` 全綠；`e2e/` 已無任何 `red_` build tag；`PROVIDER=mock`／`mitake` 各跑 `go test ./e2e -count=1` 皆 `ok`（e2e 不讀 `PROVIDER`，兩次走同一路徑；切換只影響 `cmd/smsd`）；Worker 全回收、BAT 無題目。使用者決定：1-1 維持 `review`、不標 `done`；T0009 followups 先不開單（保留於 0c）
 0b. 塔台檔與 `sprint-status.yaml` 已由使用者指示 commit（`chore(tower): 5-04＋5-10 …`）
 0c. **T0009 followups（使用者決定先不開單，保留在此）**：`sending→sent`／`sending→failed` 也通知租戶（需改 `internal/queue/queue.go`，E2E「恰好一次」改「每狀態一次」）；`sent` 逾 24h 無回呼轉 `undelivered`；`ProviderRef` 改 `(provider_name, provider_ref)` 索引（queue 需寫 `Message.Provider`）；出站簽章時間戳／防重放（須新決策取代 D013）；`PROVIDER=mock` 回呼無驗證且 cmd 已接 mock sink（D018）；`SMS_CONFIG` 載入租戶 `callback_url`／`webhook_secret`（AD-11）；`cmd/smsd/provider.go` 註解「tenant webhook URLs join it later (T0009)」過時；工單驗收寫法改 `git grep -n 'go:build red_' -- '*.go'`；`_bmad-output/tmp/verify-T0008|T0010|T0011/`（gitignored 驗證暫存，含舊版 tag 檔）可清
@@ -15,6 +16,7 @@
 5. T9002 工單時間戳異常待使用者決定：`completed_at: 19:17:00` 晚於其收單 commit（`348f696`，19:16:08）與塔台收單當下系統時間（19:16:31），疑為 Worker 憑印象填寫；塔台未改 Worker 欄位
 
 ### 近期完成摘要
+- `*evolve`／`*evolve --playbook`／`*import rule` 完成（2026-10-23T07:19，D027）：從 T0008～T0011 萃取 12 條學習寫入 `_learnings.md`（`09efd0b`），playbook `GP-SMS-001`（`be01ea8`），local rule（`2b99563`）；`gp-prefix: SMS` 已設。**待辦提醒**：P8（followups 集中）只記錄，未建 `_backlog.md`，followups 仍散在待辦 0a、0c、1a、1b；E1（`--close-worker --worktree remove` exit 3）原因未查，可回報 CT 塔台
 - T0009 DONE（5-04＋5-10 錄製，2026-10-23T03:08～03:26）：主 checkout 不隔離 yolo，無提問；產品 `b2166dd`、工單 `c7d2677`；22 檔皆在 `affects_files`；塔台重跑 build／vet／gofmt／`go test ./... -race -count=1` 全綠；`red_` tag 驗收依意圖判定（D023）；`--close-worker T0009 --delay-ms 10000` exit `0`；`sprint-status.yaml` 補同步（D024）
 - T0010、T0008 DONE＋合併（5-08 錄製，2026-10-23T02:22～03:02）：T0010 Q-1～Q-3、Q-5 塔台代答（D016～D019），Q-4 範圍變更由使用者決定 [A]（D020），Q-4 BAT `expired` → BLOCKED → Renew #1 重派 → DONE；T0010 模式 ① 合併 `1b0dabb`（D021）；T0008 模式 ② 合併工單 T0011，merge `abc1eba`，`main` = `7df6703`（D022）；<個人規則>〈合併模式 ②〉證據已送 CT 塔台
 - 2026-10-23 開立 T0008、T0009、T0010；D011～D015（骨架 build tag、main.go／testutil 歸屬、HMAC 編碼、三竹風格欄位、回呼回應碼）
@@ -35,7 +37,9 @@
 - Bug Tracker → `_bug-tracker.md`（尚未建立）
 - Backlog → `_backlog.md`（尚未建立）
 - Decision Log → [_decision-log.md](_decision-log.md)
-- Learnings → `_learnings.md`（尚未建立）
+- Learnings → [_learnings.md](_learnings.md)（12 條：P1～P8 共 8 條（P1、P5、P6 為 🟡，其餘 🔵）、A2、E1～E2、SEQ1；2026-10-23 建立）
+- Playbooks → `_playbooks/GP-SMS-001-parallel-worktree-merge.md`（🟡，專案層）
+- Local Rules → [_local-rules.md](_local-rules.md)（1 條：驗收「沒有某字串」限定追蹤的 Go 檔）
 
 ---
 
@@ -53,11 +57,12 @@
 
 | 類型 | 最大編號 |
 |------|---------|
-| 工單 | T0011（另有練習／額外單 T9002、T9003、T9004） |
+| 工單 | T0013（另有練習／額外單 T9002、T9003、T9004） |
 | BUG | 無 |
 | PLAN | 無 |
 | EXP | ROUTER：001（CONCLUDED） |
-| 決策 | D024 |
+| 決策 | D027 |
+| Playbook | GP-SMS-001（`gp-prefix: SMS`） |
 
 ---
 
@@ -65,6 +70,8 @@
 
 | 工單 | story（e2e 測試名） | 狀態 | 備註 |
 |------|------|------|------|
+| T0013 | 回顧 F10：`cmd/smsd/main_test.go`（關機順序、`purgeLoop`、`q.Run` 錯誤、provider 組裝＋變異驗證） | PENDING | sizing M；`depends_on` T0012；主 checkout 不隔離 yolo；D025 |
+| T0012 | 回顧 F1：`SMS_CONFIG` 載入、真實租戶／API key 組裝（`cmd/smsd/app.go` 可測組裝函式） | PENDING | sizing M；主 checkout 不隔離 yolo；D025、D026 |
 | T0001 | 骨架／`TestE2E_Healthz` | DONE | |
 | T0002 | 2：`TestE2E_MockAdapter_FaultInjection` | DONE | sizing S；commit `f12b02e`；收單重跑 `-race` 全綠 |
 | T0003 | 3＋4：`TestE2E_Auth_MissingKey401`、`TestE2E_Tenant_IsolationReturns404` | DONE | sizing M；commit `4302695`；D002 |
@@ -92,6 +99,8 @@
 ---
 
 ## 📝 本 Session 決策日誌
+- D027（2026-10-23，`*evolve`／`*import`）：學習、playbook、local rule 全存本專案、不建全局層；P1／P5／P6／P7 標 `candidate: global`；GP-SMS-001 以 🟡 寫入；P8 只記錄
+- D025～D026（2026-10-23，epic 1 回顧開單）：D025 F1／F10 開 T0012／T0013，`SMS_CONFIG` 必填、沿用 `tenant.Registry`、序列化；D026 設定檔欄位與驗證規則塔台定案
 - D023～D024（2026-10-23，5-04＋5-10）：D023 T0009 收單 DONE、`red_` tag 驗收依意圖判定；D024 `sprint-status.yaml` 以工單為 SoT 補同步（1-1 維持 `review`）
 - D016～D022（2026-10-23，5-08）：D016 mitake 失敗分類；D017 回呼格式（依 AD-7／AD-18 修正 Worker 建議）；D018 契約未授權回呼選填；D019 `PROVIDER_URL`；D020 架構守門圖補 `providertest`（使用者決定）；D021 T0010 模式 ①；D022 T0008 模式 ②（T0011）
 - D011～D015（2026-10-23，CH5 開單）：D011 骨架以 build tag `red_queue`／`red_webhook`／`red_mitake` commit；D012 `main.go` 由 T0008、T0010 刻意共改、`testutil` 歸 T0008；D013 HMAC-SHA256／原始 body／`X-Signature: sha256=<hex>`／租戶 `CallbackSecret`；D014 三竹風格 send 欄位塔台定案、錯誤碼對應與回呼格式留 T0010 問塔台；D015 回呼 204／重複 200

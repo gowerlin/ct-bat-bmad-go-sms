@@ -30,9 +30,47 @@
 | D023 | 2026-10-23 | T0009 收單 DONE：驗收「`grep -rn 'go:build red_' .` 無結果」依意圖判為 Go 原始碼沒有 `red_` tag（字面命中只在塔台文件與 gitignored 驗證暫存） | T0009 |
 | D024 | 2026-10-23 | `sprint-status.yaml` 以工單為 SoT 補同步：1-2～1-9、2-1～2-3 → `done`，epic-2 → `done`；1-1 無工單證據維持 `review`，epic-1 維持 `in-progress` | T0002～T0010 |
 
+| D025 | 2026-10-23 | epic 1 回顧 F1／F10 開單：T0012 補 `SMS_CONFIG` 載入、T0013 補 `main_test.go`；`SMS_CONFIG` 必填、沿用 `tenant.Registry` 不引入 `store.TenantDirectory`、T0013 序列在 T0012 之後 | T0012、T0013 |
+| D026 | 2026-10-23 | `SMS_CONFIG` JSON 欄位名與驗證規則由塔台定案（Spine AD-11 只給概念） | T0012 |
+| D027 | 2026-10-23 | `*evolve`／`*import` 產物全存本專案（不建全局層），P1、P5、P6、P7 標 `candidate: global`；GP-SMS-001 以 🟡 寫入；P8 只記錄不開單；新增 local rule 限定驗收字串檢查範圍 | T0008～T0011 |
+
 ---
 
 ## 詳細紀錄（倒序）
+
+### D027 2026-10-23 — 學習、playbook 與 local rule 的儲存範圍與置信度
+
+- **背景**：使用者要求 `*evolve` 萃取 T0008～T0011，之後 `*evolve --playbook parallel-worktree-merge`（SEQ1＋P4）與 `*import rule`。`_learnings.md`、`_playbooks/`、`_local-rules.md` 原本都不存在，全局層 `~/.claude/control-tower-data/` 也不存在。
+- **選項**：
+  - 儲存範圍：[A] 通用，存入全局（需新建 Layer 2）；[B] 本專案；[C] 先放專案並標 `candidate: global`
+  - Playbook 置信度：[A] 🟢（來源 SEQ1、P4 皆 🔵，只驗證 1 次，與 `playbook-engine.md` 晉升標準不符）；[B] 🟡 實驗中（如實反映證據）
+  - P8（followups 集中）：[A] 開單建 `_backlog.md`；[B] 只記錄
+- **決定**：全部存本專案，不建立全局層；P1、P5、P6、P7 標 `candidate: global`，其餘不標。GP-SMS-001 以 [B] 🟡 寫入專案層（使用者決定）。P8 [B] 只記錄、不開單、不建 `_backlog.md`。`*import rule` 新增「驗收『沒有某字串』一律限定追蹤的 Go 檔」，由 P1 而來（`git grep -n '<樣式>' -- '*.go'`）。`gp-prefix: SMS` 放在 `_tower-config.yaml` 頂層。
+- **影響**：後續工單的驗收寫法受 `_local-rules.md` 約束（T0012、T0013 若寫「無某字串」類驗收須照辦）。GP-SMS-001 要等再一次並行共改驗證後才能升 🟢。Episodic E1（`--close-worker --worktree remove` exit 3）、E2 未 distill。commit：`09efd0b`（學習）、`be01ea8`（playbook）、`2b99563`（local rule）。
+- **相關工單**：T0008、T0009、T0010、T0011
+
+### D026 2026-10-23 — `SMS_CONFIG` 設定檔欄位與驗證規則
+
+- **背景**：AD-11 只說「JSON、租戶／API key SHA-256 hex／`callback_url`／`webhook_secret`／`rate_limit_per_min`／`disabled`（API key 層級）」，沒有欄位名與巢狀結構；Story 1.8 與 2.1 的 AC 也只列概念。Worker 自己發明會讓 Epic 2 後續擴充與範例檔不一致。
+- **選項**：
+  - [A] 塔台定案：`{"tenants":[{"id","callback_url","webhook_secret","rate_limit_per_min","api_keys":[{"sha256","disabled"}]}]}`，`DisallowUnknownFields`，驗證規則寫進工單
+  - [B] 只做 Story 1.8 最小版（預設租戶的 `callback_url`／`webhook_secret`）：仍無法驗證 API key，`/v1/*` 依舊 401，F1 沒解
+  - [C] 留給 Worker 提問：多一輪往返，且規則本來就是塔台可決定的格式
+- **決定**：選 A。`disabled` 放 API key 層（AD-11、FR-21）；有 `callback_url` 必須有 `webhook_secret`；`rate_limit_per_min` 省略／0 沿用預設 60（D009）；錯誤訊息不得回顯 secret／hash（AD-15）。範例檔只放假值。
+- **影響**：Story 2.1 的完整租戶設定因此提前由 T0012 實作到可用程度；`epics.md` 2.1 的 AC 與 Spine AD-11 尚未回寫欄位名（回顧 action item 7，交 Winston）。
+- **相關工單**：T0012
+
+### D025 2026-10-23 — epic 1 回顧 F1／F10 開單與範圍
+
+- **背景**：使用者要求把 `epic-1-retro-2026-10-23.md` Action items 第 1 條（F1：真實 `smsd` 對所有 `/v1/*` 回 401）與第 6 條（F10：`cmd/smsd/main_test.go`）各開一張工單，只開單、不派工。D023 followups 已列「`SMS_CONFIG` 載入」。
+- **選項**：
+  - 範圍 [A]：沿用現有 `tenant.Registry`，只加「以 hash 登錄 key」入口；[B] 同時引入 Spine 的 `store.TenantDirectory`：介面重構會連動 `webhook`／`ratelimit`／`httpapi`，超出 F1，且 D020 後依賴圖才剛調整
+  - `SMS_CONFIG` 缺漏：[A] 必填、缺漏啟動失敗（與 `PROVIDER` 一致，AD-11 fail-fast）；[B] 缺漏時退回空 registry：會把「全部 401」這個靜默失敗留下來
+  - 順序：[A] T0013 `depends_on` T0012，序列；[B] 平行：兩張都改 `cmd/smsd/main.go`，T0013 還需要 T0012 抽出的組裝函式，平行必衝突
+  - F10 驗證：[A] 要求變異驗證（拿掉 `WithProvider`、對調關機順序測試必須變紅）；[B] 只寫測試：無法證明補到了回顧指出的缺口
+- **決定**：全選 A。T0012 抽出可測的組裝函式並在 `cmd/smsd` 內寫「走真實組裝根」測試（`package main` 不能被 `e2e/` import，這是 `AGENTS.md`「增量附 E2E 放 `e2e/`」的有意例外，工單要求 Worker 記錄理由）；T0013 允許兩項為可測性的最小變更（`purgeLoop` 注入 tick／clock、`q.Run` 錯誤改為記 `error_class=queue`），後者是唯一行為變更。
+- **影響**：未納入本次的回顧項目：F2／Q1 通知範圍、F3 Story 1.1 收單、F8 `Send` 逾時值、F9 空 `ProviderRef`、action item 7～9 皆未開單，等使用者決定。T0012 完成並合回 `main` 才能派 T0013。兩張都不隔離、主 checkout yolo（比照 T0009）。本次只開單，不派工；sprint-status 無對應 story，不動。
+- **相關工單**：T0012、T0013
 
 ### D024 2026-10-23 — `sprint-status.yaml` 以工單為 SoT 補同步
 

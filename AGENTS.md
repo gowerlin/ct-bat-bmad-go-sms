@@ -34,6 +34,7 @@ Go 示範專案：SMS 通訊平台（REST 發送 API、供應商 adapter、佇�
 | `_bmad/`、`_bmad-output/` | BMad 安裝與規劃產物（進 git） |
 | `_ct-workorders/` | 課程工單 |
 
+- 多代理工作流（工單模板、派工、worktree、收單門檻、決策日誌）見 `docs/multi-agent-workflow.md`；程式慣例見 `FIELDGUIDE.md`。Worker 開工前先讀。
 - `cmd` 只能 import `internal/*`；`internal/*` 之間依各 `doc.go` 的「不擁有」互不越界（例如 `httpapi` 不碰 store 資料結構細節，`provider` 不重試）。
 
 ## Running and verifying
