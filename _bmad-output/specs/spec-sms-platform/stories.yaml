@@ -1,0 +1,121 @@
+- id: "1"
+  title: 送出訊息並可查詢
+  description: >-
+    CAP-1、CAP-2 的最小路徑：POST /v1/messages 回 202 與 id，GET /v1/messages/{id} 查得 status。
+    本 story 不需要 API key（驗證在 story 3 加入），store 先用 in-memory。
+  e2e: TestE2E_SendMessage_Returns202AndQueryable
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    E2E 測試名：TestE2E_SendMessage_Returns202AndQueryable。暫不做 X-API-Key 驗證與限流；
+    store 用 in-memory 實作，遵守 AD-4/AD-5 介面形狀，之後加驗證時不得改介面語意。
+- id: "2"
+  title: mock Provider 故障注入
+  description: >-
+    CAP-3：mock Adapter 可注入暫時失敗、永久失敗與成功，供後續重試與失敗路徑的 E2E 使用。
+  e2e: TestE2E_MockAdapter_FaultInjection
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    E2E 測試名：TestE2E_MockAdapter_FaultInjection。Send 不重試不 sleep，error 須 wrap
+    ErrTransient 或 ErrPermanent（AD-1）；mock 不得發外部網路請求。
+- id: "3"
+  title: 缺 API key 回 401
+  description: >-
+    CAP-9、CAP-10：/v1/* 缺、無效或停用 X-API-Key 回 401 unauthorized，使用統一錯誤信封。
+  e2e: TestE2E_Auth_MissingKey401
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    E2E 測試名：TestE2E_Auth_MissingKey401。把 story 1 的端點納入驗證；
+    租戶設定欄位用 callback_url；API key 只存 SHA-256 hex；錯誤碼見 error-codes.md。
+- id: "4"
+  title: 跨租戶查詢回 404
+  description: >-
+    CAP-9：租戶 A 查詢租戶 B 的訊息回 404 not_found（不是 403）。
+  e2e: TestE2E_Tenant_IsolationReturns404
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    E2E 測試名：TestE2E_Tenant_IsolationReturns404。tenant_id 只從 request context 取，
+    每個 store 查詢帶 tenantID（AD-4）。
+- id: "5"
+  title: 模板渲染變數
+  description: >-
+    CAP-7：模板 CRUD，並在入佇列前以 {{變數}} 渲染；送信帶 template_id 與變數。
+  e2e: TestE2E_Template_RendersVariables
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    E2E 測試名：TestE2E_Template_RendersVariables。渲染在 queue.Submit 之前，
+    渲染結果與直接內容走同一個驗證函式（AD-8、AD-16）。
+- id: "6"
+  title: 超量回 429 與 Retry-After
+  description: >-
+    CAP-8：每 API key 一桶 token bucket，超量回 429 rate_limited 並帶正整數秒 Retry-After。
+  e2e: TestE2E_RateLimit_Returns429WithRetryAfter
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    E2E 測試名：TestE2E_RateLimit_Returns429WithRetryAfter。middleware 順序為
+    authenticate → ratelimit → handler；時間經注入的 FakeClock，不睡真實時間（AD-10、AD-12）。
+- id: "7"
+  title: 依 status 列表篩選
+  description: >-
+    CAP-2：GET /v1/messages?status=… 只回該租戶符合 Status 的訊息，非法 status 回 400。
+  e2e: TestE2E_ListMessages_FilterByStatus
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    E2E 測試名：TestE2E_ListMessages_FilterByStatus。排序鍵 (created_at, id) 新到舊，
+    cursor 為 store 產生的不透明字串（AD-14）。
+- id: "8"
+  title: 模板缺變數回 422
+  description: >-
+    CAP-7：帶 template_id 但缺變數回 422 missing_template_variable，message 列出變數名，且不建立訊息。
+  e2e: TestE2E_Template_MissingVariableReturns422
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    E2E 測試名：TestE2E_Template_MissingVariableReturns422。template 回 ErrMissingVariable，
+    由 httpapi 的 writeError 對應 422（AD-8、AD-16）。
+- id: "9"
+  title: 重試後成功
+  description: >-
+    CAP-1、CAP-4：背景 worker 送出；Provider 暫時失敗後於重試中成功，Status 不為 failed 且不再呼叫。
+  e2e: TestE2E_Queue_RetriesThenSucceeds
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    E2E 測試名：TestE2E_Queue_RetriesThenSucceeds。重試歸 queue，退避 1s、2s、4s 經注入的 Wait；
+    sending→sent 以單次 CAS 寫 provider_ref 與 attempts（AD-2、AD-6、AD-13）。
+- id: "10"
+  title: 重試用盡標記 failed
+  description: >-
+    CAP-4、CAP-2：連續暫時失敗時 Provider 被呼叫 4 次後 failed，attempts=4、failure_reason 為重試用盡。
+  e2e: TestE2E_Queue_ExhaustsRetriesMarksFailed
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    E2E 測試名：TestE2E_Queue_ExhaustsRetriesMarksFailed。failed 必須在同一次 CAS 帶非空
+    failure_reason（AD-5）；不跨 Provider failover。
+- id: "11"
+  title: 回呼更新狀態並只通知租戶一次
+  description: >-
+    CAP-5、CAP-6：Provider 回呼將 sent 更新為 delivered，租戶 Webhook 收到 HMAC 簽章通知，重複回呼不重複通知。
+  e2e: TestE2E_Webhook_DeliveredUpdatesStatusAndNotifiesTenantOnce
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    E2E 測試名：TestE2E_Webhook_DeliveredUpdatesStatusAndNotifiesTenantOnce。
+    轉移與 outbox 入列同一原子操作，(message_id, status) 唯一；回呼驗證在 ParseCallback 內（AD-3、AD-5、AD-7）。
+- id: "12"
+  title: mitake 風格 Adapter 契約測試
+  description: >-
+    CAP-3：mitake Adapter 只連假對端，對應成功、暫時失敗、永久失敗與回呼四種回應，並通過共用 Provider 契約測試。
+  e2e: TestE2E_MitakeAdapter_ContractAgainstFakeServer
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: >-
+    E2E 測試名：TestE2E_MitakeAdapter_ContractAgainstFakeServer。http.Client 只在 cmd/smsd 建立並注入，
+    Transport 用允許清單（AD-9）；與 mock 共用 providertest 契約測試（AD-1）。

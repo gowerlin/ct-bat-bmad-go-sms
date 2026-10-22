@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -31,6 +32,16 @@ func (c *FakeClock) Advance(d time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.now = c.now.Add(d)
+}
+
+// Wait is the injected replacement for sleeping: it advances the clock by d
+// without blocking, or returns ctx.Err() if ctx is already done.
+func (c *FakeClock) Wait(ctx context.Context, d time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.Advance(d)
+	return nil
 }
 
 // Set jumps the clock to t.

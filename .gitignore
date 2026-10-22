@@ -12,3 +12,6 @@ bin/
 # _bmad/ (config + manifest) IS committed; _bmad-output/ IS committed.
 .agents/
 .claude/
+
+# scratch scripts (AGENTS.md pitfalls)
+_bmad-output/tmp/

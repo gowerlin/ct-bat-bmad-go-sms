@@ -5,6 +5,8 @@
 | 檔案 | 內容 | 狀態 |
 |---|---|---|
 | `openapi.yaml` | § 5.4 路徑清單（OpenAPI 3.1 空殼，schema 留 TODO） | P1-c 空殼；每張實作工單補 schema；CH5 完稿 |
+| `error-codes.md` | 錯誤信封與錯誤碼清單（變更＝相容性變更） | Story 1.1 |
+| `onboarding.md` | 租戶接入文件（含重啟限制 FR-28） | Story 1.1 起 |
 | 本檔 | 資料模型草案 ↔ Go 套件對照 | P1-c |
 
 ## 資料模型草案（對照 COURSE-PLAN § 5.3）

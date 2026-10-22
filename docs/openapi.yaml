@@ -38,14 +38,21 @@ paths:
       summary: 送出訊息（CH2；202＋id；可帶 template_id＋vars）
       operationId: sendMessage
       requestBody:
-        description: "TODO: SendMessageRequest（to、body 或 template_id＋vars）"
         required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SendMessageRequest" }
       responses:
         "202":
-          description: "TODO: 已排入佇列，回 id 與 status=queued"
+          description: 已排入佇列，回 id 與 status=queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SendMessageResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/QueueFull" }
     get:
       summary: 列表與篩選（CH4，T0006；`?status=`）
       operationId: listMessages
@@ -69,7 +76,10 @@ paths:
         - $ref: "#/components/parameters/Id"
       responses:
         "200":
-          description: "TODO: Message"
+          description: 訊息目前狀態
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Message" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -151,6 +161,16 @@ components:
       schema:
         type: string
   responses:
+    BadRequest:
+      description: 欄位缺漏、號碼非 E.164、內容超過 70 code point、JSON 無效；405 方法不符亦用 invalid_request 並帶 Allow
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    QueueFull:
+      description: 佇列滿載（queue_full），不建立訊息
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     Unauthorized:
       description: 無或錯誤的 API key
     NotFound:
@@ -164,10 +184,41 @@ components:
           schema:
             type: integer
   schemas:
-    # TODO (T0001 起逐張工單補): Error, SendMessageRequest, Message,
-    # MessageList, TemplateRequest, Template, TemplateList, DeliveryReport,
-    # OutboundNotification — 欄位以 docs/README.md 的資料模型草案為準。
-    {}
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, description: 見 docs/error-codes.md }
+            message: { type: string }
+    SendMessageRequest:
+      type: object
+      required: [to, body]
+      properties:
+        to: { type: string, pattern: '^\+[1-9]\d{1,14}$' }
+        body: { type: string, description: 最多 70 個 Unicode code point }
+    SendMessageResponse:
+      type: object
+      required: [id, status]
+      properties:
+        id: { type: string, description: "msg_ 加 128 位元 hex" }
+        status: { type: string, const: queued }
+    Message:
+      type: object
+      required: [id, to, status, attempts, created_at, updated_at]
+      properties:
+        id: { type: string }
+        to: { type: string }
+        status: { type: string, enum: [queued, sending, sent, delivered, undelivered, failed] }
+        attempts: { type: integer }
+        failure_reason: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    # TODO（後續 Story 補）: MessageList, TemplateRequest, Template,
+    # TemplateList, DeliveryReport, OutboundNotification。
 
 security:
   - ApiKey: []

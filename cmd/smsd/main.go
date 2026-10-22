@@ -1,14 +1,12 @@
-// Command smsd is the SMS platform HTTP server.
-//
-// This skeleton serves only GET /healthz. Every other route in
-// docs/openapi.yaml arrives with its own work order (T0001 onward).
+// Command smsd is the SMS platform HTTP server and the composition root: it
+// wires dependencies, opens the listener and shuts down gracefully. It holds
+// no business logic.
 package main
 
 import (
 	"context"
 	"errors"
-	"flag"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -17,30 +15,73 @@ import (
 	"time"
 
 	"example.com/sms-platform/internal/httpapi"
+	"example.com/sms-platform/internal/provider/mock"
+	"example.com/sms-platform/internal/queue"
+	"example.com/sms-platform/internal/store"
+)
+
+const (
+	defaultListenAddr = ":8080"
+	purgeInterval     = time.Minute
+	shutdownTimeout   = 10 * time.Second
 )
 
 func main() {
-	addr := flag.String("addr", "127.0.0.1:8080", "TCP address to listen on")
-	flag.Parse()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey && a.Value.Kind() == slog.KindTime {
+				a.Value = slog.TimeValue(a.Value.Time().UTC())
+			}
+			return a
+		},
+	})))
 
-	ln, err := net.Listen("tcp", *addr)
+	addr := os.Getenv("LISTEN_ADDR")
+	if addr == "" {
+		addr = defaultListenAddr
+	}
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatalf("smsd: listen %s: %v", *addr, err)
+		slog.Error("listen failed", "error_class", "listen")
+		os.Exit(1)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	log.Printf("smsd: listening on http://%s", ln.Addr())
-	if err := run(ctx, ln, httpapi.NewHandler(httpapi.Deps{})); err != nil {
-		log.Fatalf("smsd: %v", err)
+	st := store.New(time.Now)
+	q := queue.NewInProcess(st)
+	prov := mock.New() // consumed by the queue workers from Story 1.6
+	h := httpapi.NewHandler(httpapi.Deps{Now: time.Now, Queue: q, Store: st})
+
+	go func() { _ = q.Run(ctx) }()
+	go purgeLoop(ctx, st)
+
+	slog.Info("listening", "provider", prov.Name())
+	if err := run(ctx, ln, h, q); err != nil {
+		slog.Error("server stopped", "error_class", "run")
+		os.Exit(1)
 	}
 }
 
-// run serves h on ln until ctx is cancelled, then shuts the server down
-// gracefully. The listener is injected so that tests can pass their own
-// (e.g. a loopback listener on port 0) and share this exact serving path.
-func run(ctx context.Context, ln net.Listener, h http.Handler) error {
+// purgeLoop periodically asks the store to drop expired terminal messages.
+func purgeLoop(ctx context.Context, st store.System) {
+	t := time.NewTicker(purgeInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			st.PurgeExpired(time.Now())
+		}
+	}
+}
+
+// run serves h on ln until ctx is cancelled, then stops the listener first and
+// closes the queue second, bounded by shutdownTimeout. The listener is
+// injected so tests can share this exact serving path.
+func run(ctx context.Context, ln net.Listener, h http.Handler, q queue.Queue) error {
 	srv := &http.Server{
 		Handler:           h,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -56,8 +97,10 @@ func run(ctx context.Context, ln net.Listener, h http.Handler) error {
 		}
 		return err
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
-		return srv.Shutdown(shutdownCtx)
+		shutErr := srv.Shutdown(shutdownCtx)
+		closeErr := q.Close(shutdownCtx)
+		return errors.Join(shutErr, closeErr)
 	}
 }

@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"example.com/sms-platform/internal/httpapi"
+	"example.com/sms-platform/internal/queue"
+	"example.com/sms-platform/internal/store"
 )
 
 // Env is one running test server plus the fakes wired into it.
@@ -19,6 +21,8 @@ type Env struct {
 	Client   *http.Client
 	Clock    *FakeClock
 	Provider *FakeProvider
+	Store    *store.Memory
+	Queue    queue.Queue
 }
 
 // NewTestServer starts the platform handler (the same one cmd/smsd serves)
@@ -27,10 +31,12 @@ func NewTestServer(t testing.TB) *Env {
 	t.Helper()
 	clock := NewFakeClock()
 	prov := NewFakeProvider(clock.Now)
-	h := httpapi.NewHandler(httpapi.Deps{Now: clock.Now, Provider: prov})
+	st := store.New(clock.Now)
+	q := queue.NewInProcess(st)
+	h := httpapi.NewHandler(httpapi.Deps{Now: clock.Now, Queue: q, Store: st})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &Env{Server: srv, Client: srv.Client(), Clock: clock, Provider: prov}
+	return &Env{Server: srv, Client: srv.Client(), Clock: clock, Provider: prov, Store: st, Queue: q}
 }
 
 // URL joins the server base URL with path.

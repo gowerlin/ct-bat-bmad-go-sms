@@ -1,0 +1,54 @@
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when its first story starts (via build's sprint sync)
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates the next story after the previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; the status view surfaces open ones
+generated: 10-22-2026 17:29
+last_updated: 10-22-2026 17:44
+project: sms-platform
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+development_status:
+  epic-1: in-progress
+  1-1-送出訊息並可查詢: review
+  1-2-mock-provider-故障注入: backlog
+  1-3-依-status-列表篩選: backlog
+  1-4-模板渲染變數: backlog
+  1-5-模板缺變數回-422: backlog
+  1-6-重試後成功: backlog
+  1-7-重試用盡標記-failed: backlog
+  1-8-回呼更新狀態並只通知租戶一次: backlog
+  1-9-mitake-風格-adapter-契約測試: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-缺-api-key-回-401: backlog
+  2-2-跨租戶查詢回-404: backlog
+  2-3-超量回-429-與-retry-after: backlog
+  epic-2-retrospective: optional

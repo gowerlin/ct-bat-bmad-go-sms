@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 )
@@ -24,6 +25,14 @@ type Provider interface {
 	// Name is the identifier used in PROVIDER=… and in the callback path.
 	Name() string
 }
+
+// Sentinel errors an adapter wraps (AD-1). Unclassified errors count as
+// ErrPermanent. Wrapped reason codes must not contain numbers or content.
+var (
+	ErrTransient    = errors.New("provider: transient failure")
+	ErrPermanent    = errors.New("provider: permanent failure")
+	ErrUnauthorized = errors.New("provider: unauthorized callback")
+)
 
 // OutboundMessage is what the platform asks a provider to send. The body is
 // already rendered (template variables substituted) by the time it gets here.
