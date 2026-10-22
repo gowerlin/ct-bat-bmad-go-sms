@@ -1,0 +1,6 @@
+# Keep shell/container files LF even on Windows checkouts with core.autocrlf=true
+*.sh text eol=lf
+Makefile text eol=lf
+Dockerfile text eol=lf
+*.yaml text eol=lf
+*.go text eol=lf

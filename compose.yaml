@@ -1,0 +1,46 @@
+# sms-platform dev container (T0193; mount moved to the repo root in T0194 /
+# D116 ①; COURSE-PLAN § 6.4 C; used by 4-09 / 4-10).
+#
+# Run every docker command from the WSL distro that owns the daemon (D113):
+#   wsl -e bash -lc 'cd /mnt/d/.../courses/ct-bat-bmad-go-sms/sms-platform && docker compose up -d dev'
+#   docker port bat-server-sms-platform        # 9876/tcp -> 127.0.0.1:9880
+#   docker exec bat-server-sms-platform sh -lc 'go test ./... -race'   # working_dir is sms-platform/
+# Then in BAT: Profiles → + More → Add Docker Profile → "Use existing" and pick
+# the COURSE REPO ROOT (D:\...\BMad-Guide), so the stored mount matches
+# /workspace/BMad-Guide. Students: mount your own repo root the same way.
+name: sms-platform
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # The CT skills are outside this folder; BuildKit named context.
+      additional_contexts:
+        ct-skills: ../../../BMad-Control-Tower/BMad-Control-Tower-v5.12.2/skills
+      args:
+        BAT_IMAGE: bat-server:latest
+        GO_VERSION: "1.27.3"
+    image: sms-platform-dev:latest
+    container_name: bat-server-sms-platform
+    restart: unless-stopped
+    ports:
+      # loopback only: the server hands out a root shell (docker-deployment.md
+      # § Port exposure). 9880 avoids BAT's own remote server port 9876.
+      - "127.0.0.1:9880:9876"
+    volumes:
+      # The ONE host folder the BAT wizard will be told about; container path
+      # is fixed to /workspace/<folder name>. The course repo root is mounted
+      # (not just sms-platform/) so .git is inside the mount and work orders
+      # can be committed from within the container (D116 ①). ../../.. resolves
+      # to the course repo root (/mnt/d/.../BMad-Guide when run from WSL).
+      - ../../..:/workspace/BMad-Guide
+      # Token + certificate survive `docker rm` on the named volume.
+      - bat-server-sms-platform-data:/root/.local/share/bat-server
+    # Shells and `docker exec` start in the Go module, not at the repo root.
+    working_dir: /workspace/BMad-Guide/courses/ct-bat-bmad-go-sms/sms-platform
+    # entrypoint / command / healthcheck come from bat-server:latest — do not
+    # override them, or BAT's "Use existing" cannot read the token.
+
+volumes:
+  bat-server-sms-platform-data:

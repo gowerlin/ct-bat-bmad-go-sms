@@ -1,0 +1,173 @@
+# sms-platform API — OpenAPI shell (COURSE-PLAN § 5.4).
+# T0193 (P1-c) lists the routes only; request/response schemas are TODO and
+# are filled by the work order that implements each route. CH5 finalises it.
+openapi: 3.1.0
+info:
+  title: sms-platform API
+  version: 0.0.1-skeleton
+  description: |
+    SMS 通訊平台（課程示範專案）。錯誤格式一律
+    `{"error":{"code":"…","message":"…"}}`；401 無 API key、404 跨租戶、
+    422 模板缺變數、429 限流（含 `Retry-After`）。
+    租戶以 header `X-API-Key` 認證。
+servers:
+  - url: http://127.0.0.1:8080
+    description: local smsd (`make run`)
+
+paths:
+  /healthz:
+    get:
+      summary: 健康檢查（CH1，T0001）
+      operationId: healthz
+      security: []
+      responses:
+        "200":
+          description: 服務存活
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    const: ok
+                required: [status]
+
+  /v1/messages:
+    post:
+      summary: 送出訊息（CH2；202＋id；可帶 template_id＋vars）
+      operationId: sendMessage
+      requestBody:
+        description: "TODO: SendMessageRequest（to、body 或 template_id＋vars）"
+        required: true
+      responses:
+        "202":
+          description: "TODO: 已排入佇列，回 id 與 status=queued"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    get:
+      summary: 列表與篩選（CH4，T0006；`?status=`）
+      operationId: listMessages
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [queued, sending, sent, delivered, undelivered, failed]
+      responses:
+        "200":
+          description: "TODO: MessageList"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/messages/{id}:
+    get:
+      summary: 查單筆狀態（CH2）
+      operationId: getMessage
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: "TODO: Message"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/templates:
+    post:
+      summary: 建立模板（CH4，T0004）
+      operationId: createTemplate
+      requestBody:
+        description: "TODO: TemplateRequest（name、body with {{var}}）"
+        required: true
+      responses:
+        "201":
+          description: "TODO: Template"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    get:
+      summary: 列出模板（CH4，T0004）
+      operationId: listTemplates
+      responses:
+        "200":
+          description: "TODO: TemplateList"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/templates/{id}:
+    get:
+      summary: 讀取模板（CH4，T0004）
+      operationId: getTemplate
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: "TODO: Template"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      summary: 刪除模板（CH4，T0004）
+      operationId: deleteTemplate
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204":
+          description: 已刪除
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/providers/{name}/callbacks:
+    post:
+      summary: 供應商狀態回呼（CH5，T0009）
+      operationId: providerCallback
+      security: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [mock, mitake]
+      requestBody:
+        description: "TODO: 供應商各自的回呼格式，由 Provider.ParseCallback 解析"
+      responses:
+        "204":
+          description: 已接收
+        "404":
+          description: 未知供應商或 provider_ref
+
+# 出站（非本 API 的路徑）：平台以 HMAC 簽章 POST 到租戶的 callback_url，
+# 每則訊息最多通知一次（OutboundNotification，CH5 T0009）。TODO: 文件化 payload 與簽章 header。
+
+components:
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    Unauthorized:
+      description: 無或錯誤的 API key
+    NotFound:
+      description: 不存在或屬於其他租戶
+    UnprocessableEntity:
+      description: 模板缺變數等驗證錯誤
+    TooManyRequests:
+      description: 超過租戶速率限制
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+  schemas:
+    # TODO (T0001 起逐張工單補): Error, SendMessageRequest, Message,
+    # MessageList, TemplateRequest, Template, TemplateList, DeliveryReport,
+    # OutboundNotification — 欄位以 docs/README.md 的資料模型草案為準。
+    {}
+
+security:
+  - ApiKey: []
