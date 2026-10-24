@@ -1,6 +1,6 @@
 // Package queue owns the outbound send queue: ordering, worker dispatch,
 // retry policy and the queued → sending → sent / failed transitions
-// (COURSE-PLAN § 5.1 #3, T0008).
+// (T0008).
 //
 // Package boundary:
 //   - owns: when a message is handed to the Provider, how many attempts are

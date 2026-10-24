@@ -5,7 +5,7 @@
 
 ## sms-platform
 
-Go 示範專案：SMS 通訊平台（REST 發送 API、供應商 adapter、佇列重試、狀態回呼、模板、速率限制、多租戶 API key），沒有 Web 主控台。獨立 module `example.com/sms-platform`（保留網域，永不被 `go get` 解析；學員換成自己的 host 時只改 `go.mod` 與 import）。任何在本目錄工作的 agent 都先讀本檔。規劃產物在 `_bmad-output/`，課程計畫 `../COURSE-PLAN.md`（§ 5 貫穿線、§ 6.2 供應商策略、§ 7.1 目錄）。
+Go 示範專案：SMS 通訊平台（REST 發送 API、供應商 adapter、佇列重試、狀態回呼、模板、速率限制、多租戶 API key），沒有 Web 主控台。獨立 module `example.com/sms-platform`（保留網域，永不被 `go get` 解析；學員換成自己的 host 時只改 `go.mod` 與 import）。任何在本目錄工作的 agent 都先讀本檔。規劃產物在 `_bmad-output/`；課程章節與影片見 `README.md`〈學員從這裡開始〉。
 
 ## Policy
 
@@ -48,7 +48,7 @@ Go 示範專案：SMS 通訊平台（REST 發送 API、供應商 adapter、佇�
 ## Conventions that differ from defaults
 
 - 時間經注入的 `func() time.Time`；業務邏輯不得直接呼叫 `time.Now`。建構子的預設值與 `cmd` 組裝處可以。
-- E2E 命名 `TestE2E_<Feature>_<Behavior>`，例如 `TestE2E_SendMessage_Returns202AndQueryable`、`TestE2E_RateLimit_Returns429WithRetryAfter`（清單見 COURSE-PLAN § 5.1）。
+- E2E 命名 `TestE2E_<Feature>_<Behavior>`，例如 `TestE2E_SendMessage_Returns202AndQueryable`、`TestE2E_RateLimit_Returns429WithRetryAfter`（現有清單見 `e2e/`）。
 
 ## Known pitfalls
 

@@ -1,20 +1,25 @@
 <#
 .SYNOPSIS
-  Windows wrapper for scripts/dev-container.sh — runs it inside WSL (D113:
-  every docker command goes to the WSL daemon, never to the Windows docker CLI).
-  The container mounts the course repo root (sms-platform/../../..) at
-  /workspace/<root dir name> (T0194 / D116 ①); test/shell run in sms-platform/.
+  Windows wrapper for scripts/dev-container.sh — runs it inside WSL (every
+  docker command goes to the WSL daemon, never to the Windows docker CLI).
+  The container mounts the git repo root that contains sms-platform/ at
+  /workspace/<root dir name>; test/shell run in sms-platform/.
 
 .EXAMPLE
   .\scripts\dev-container.ps1 up        # build if needed, create + start, show port/health
   .\scripts\dev-container.ps1 test      # go test ./... -race inside the container
+  .\scripts\dev-container.ps1 env       # SMS_* values for compose.yaml (this layout)
+  .\scripts\dev-container.ps1 compose config
   .\scripts\dev-container.ps1 down
   .\scripts\dev-container.ps1 up -Distro Ubuntu-24.04
 #>
 param(
-  [ValidateSet('build', 'up', 'start', 'stop', 'down', 'status', 'shell', 'logs', 'test')]
+  [ValidateSet('build', 'up', 'start', 'stop', 'down', 'status', 'shell', 'logs', 'test', 'env', 'compose')]
   [string]$Cmd = 'up',
-  [string]$Distro = ''
+  [string]$Distro = '',
+  # compose only: the docker compose arguments (e.g. config, up -d dev)
+  [Parameter(ValueFromRemainingArguments = $true)]
+  [string[]]$Rest = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,6 +33,7 @@ $wslPath = (& wsl @wslArgs -e wslpath -a $smsPlatform).Trim()
 
 # The script is read with CRLF stripped so a checkout with core.autocrlf=true
 # still runs; .gitattributes keeps it LF anyway.
-$inner = "cd '$wslPath' && SMS_PLATFORM_DIR='$wslPath' bash <(tr -d '\r' < scripts/dev-container.sh) $Cmd"
+$restArgs = ($Rest | ForEach-Object { "'" + ($_ -replace "'", "'\''") + "'" }) -join ' '
+$inner = "cd '$wslPath' && SMS_PLATFORM_DIR='$wslPath' bash <(tr -d '\r' < scripts/dev-container.sh) $Cmd $restArgs"
 & wsl @wslArgs -e bash -lc $inner
 exit $LASTEXITCODE

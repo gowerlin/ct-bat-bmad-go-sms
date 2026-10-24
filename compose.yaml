@@ -1,13 +1,27 @@
-# sms-platform dev container (T0193; mount moved to the repo root in T0194 /
-# D116 ①; COURSE-PLAN § 6.4 C; used by 4-09 / 4-10).
+# sms-platform dev container (course units 4-09 / 4-10).
 #
-# Run every docker command from the WSL distro that owns the daemon (D113):
-#   wsl -e bash -lc 'cd /mnt/d/.../courses/ct-bat-bmad-go-sms/sms-platform && docker compose up -d dev'
+# Defaults fit the public repo: sms-platform IS the repo root, cloned as
+# ct-bat-bmad-go-sms. Another layout sets the SMS_* variables below, in the
+# shell or in .env next to this file (compose reads it; .env is not in git):
+#   SMS_REPO_ROOT  host folder to mount = the repo root (default .)
+#   SMS_REPO_NAME  its folder name; container path is /workspace/<name>
+#                  (default ct-bat-bmad-go-sms)
+#   SMS_SUBDIR     sms-platform's path inside the repo, with a leading /
+#                  (default empty: sms-platform is the repo root)
+#   SMS_CT_SKILLS  folder holding control-tower/ and ct-*/ to bake into the
+#                  image (default: none; see Dockerfile)
+#   SMS_IMAGE      image tag (default sms-platform-dev:latest)
+# `scripts/dev-container.sh env` prints these for the repo it sits in, e.g.
+# sms-platform inside a bigger repo (the course production repo):
+#   scripts/dev-container.sh env >> .env
+#
+# Run every docker command from the WSL distro that owns the daemon:
+#   wsl -e bash -lc 'cd /mnt/<drive>/.../sms-platform && docker compose up -d dev'
 #   docker port bat-server-sms-platform        # 9876/tcp -> 127.0.0.1:9880
 #   docker exec bat-server-sms-platform sh -lc 'go test ./... -race'   # working_dir is sms-platform/
 # Then in BAT: Profiles → + More → Add Docker Profile → "Use existing" and pick
-# the COURSE REPO ROOT (D:\...\BMad-Guide), so the stored mount matches
-# /workspace/BMad-Guide. Students: mount your own repo root the same way.
+# the folder SMS_REPO_ROOT points at, so the stored mount matches
+# /workspace/<SMS_REPO_NAME>.
 name: sms-platform
 
 services:
@@ -15,13 +29,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      # The CT skills are outside this folder; BuildKit named context.
+      # Optional BuildKit named context; replaces the empty `ct-skills` stage
+      # of the Dockerfile. scripts/ct-skills-none/ holds no skills.
       additional_contexts:
-        ct-skills: ../../../BMad-Control-Tower/BMad-Control-Tower-v5.12.2/skills
+        ct-skills: ${SMS_CT_SKILLS:-./scripts/ct-skills-none}
       args:
         BAT_IMAGE: bat-server:latest
         GO_VERSION: "1.27.3"
-    image: sms-platform-dev:latest
+        SMS_WORKDIR: /workspace/${SMS_REPO_NAME:-ct-bat-bmad-go-sms}${SMS_SUBDIR:-}
+    image: ${SMS_IMAGE:-sms-platform-dev:latest}
     container_name: bat-server-sms-platform
     restart: unless-stopped
     ports:
@@ -30,17 +46,16 @@ services:
       - "127.0.0.1:9880:9876"
     volumes:
       # The ONE host folder the BAT wizard will be told about; container path
-      # is fixed to /workspace/<folder name>. The course repo root is mounted
-      # (not just sms-platform/) so .git is inside the mount and work orders
-      # can be committed from within the container (D116 ①). ../../.. resolves
-      # to the course repo root (/mnt/d/.../BMad-Guide when run from WSL).
-      - ../../..:/workspace/BMad-Guide
+      # is fixed to /workspace/<folder name>. The repo root is mounted (not
+      # just sms-platform/ when it sits deeper) so .git is inside the mount
+      # and work orders can be committed from within the container.
+      - ${SMS_REPO_ROOT:-.}:/workspace/${SMS_REPO_NAME:-ct-bat-bmad-go-sms}
       # Token + certificate survive `docker rm` on the named volume.
       - bat-server-sms-platform-data:/root/.local/share/bat-server
     # Shells and `docker exec` start in the Go module, not at the repo root.
-    working_dir: /workspace/BMad-Guide/courses/ct-bat-bmad-go-sms/sms-platform
-    # smsd has no default provider (T0010): without this, `make run` inside
-    # the container fails at startup. mock never touches the network.
+    working_dir: /workspace/${SMS_REPO_NAME:-ct-bat-bmad-go-sms}${SMS_SUBDIR:-}
+    # smsd has no default provider: without this, `make run` inside the
+    # container fails at startup. mock never touches the network.
     environment:
       PROVIDER: mock
     # entrypoint / command / healthcheck come from bat-server:latest — do not

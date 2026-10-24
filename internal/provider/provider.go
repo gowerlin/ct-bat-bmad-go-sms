@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Provider is the SMS supplier adapter (COURSE-PLAN § 6.2). The interface is
+// Provider is the SMS supplier adapter. The interface is
 // finalised in CH5; this is the draft every adapter implements.
 //
 // Implementations: internal/provider/mock (course mainline) and, from CH5,
@@ -61,8 +61,8 @@ const (
 	StatusFailed      Status = "failed"
 )
 
-// DeliveryReport is a decoded supplier callback (COURSE-PLAN § 5.3
-// DeliveryReport). The mapping ProviderRef → message_id is done by the
+// DeliveryReport is a decoded supplier callback (DeliveryReport in the
+// docs/README.md data model). The mapping ProviderRef → message_id is done by the
 // webhook package, not by the provider.
 type DeliveryReport struct {
 	ProviderRef string

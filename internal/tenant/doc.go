@@ -1,6 +1,6 @@
-// Package tenant owns multi-tenancy: the Tenant entity (§ 5.3), API-key
-// hashing and lookup, and tenant isolation rules (COURSE-PLAN § 5.1 #7,
-// T0003).
+// Package tenant owns multi-tenancy: the Tenant entity (data model in
+// docs/README.md), API-key hashing and lookup, and tenant isolation rules
+// (T0003).
 //
 // Package boundary:
 //   - owns: resolving X-API-Key → tenant, the "not found across tenants"

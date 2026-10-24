@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Expose the WSL Docker daemon's unix socket on 127.0.0.1:2375 (plain TCP) so
 # the Windows `docker` CLI — and therefore BAT's Docker wizard, which runs
-# `docker` on Windows — can talk to the daemon that lives inside WSL (D113).
-# Tested on T0193 with WSL networkingMode=Mirrored: Windows 127.0.0.1:2375
+# `docker` on Windows — can talk to the daemon that lives inside WSL.
+# Tested with WSL networkingMode=Mirrored: Windows 127.0.0.1:2375
 # reaches this listener directly.
 #
 # No sudo, no dockerd config change: it runs as your WSL user, who is in the

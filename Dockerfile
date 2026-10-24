@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# sms-platform dev container (T0193; COURSE-PLAN § 6.4 C, 4-09 要點①③⑤).
+# sms-platform dev container (course unit 4-09).
 #
 # Base image: the BAT server image you build yourself from the BAT source
 #   (cd better-agent-terminal && npm ci && npm run build:docker-image
@@ -10,11 +10,18 @@
 # We inherit all of that unchanged so BAT's Docker wizard can attach with
 # "Use existing" (docker-deployment.md § Dev Container Integration).
 #
-# Build needs BuildKit (docker buildx) because the CT skills live outside this
-# build context and come in as the named context `ct-skills`:
-#   docker compose build dev                      (additional_contexts in compose.yaml)
+# Build needs BuildKit (docker buildx). The Control Tower skills are optional
+# and come in as the named context `ct-skills`, which replaces the empty stage
+# of the same name below:
+#   docker compose build dev                      (SMS_CT_SKILLS in compose.yaml)
 #   docker build --build-context ct-skills=<dir> -t sms-platform-dev .
+#   docker build -t sms-platform-dev .            (no CT skills baked in)
 ARG BAT_IMAGE=bat-server:latest
+
+# Default for the named context: nothing. --build-context ct-skills=<dir>
+# overrides this stage.
+FROM scratch AS ct-skills
+
 FROM ${BAT_IMAGE}
 
 # Go toolchain: same version as the recording host (go.mod `go 1.27.3`).
@@ -48,20 +55,28 @@ RUN printf 'export PATH=/usr/local/go/bin:/root/go/bin:$PATH\nexport GOTOOLCHAIN
 # The server runs as root while the bind-mounted repo belongs to the host
 # user; without this, git (and go's VCS stamping) refuses the "dubious
 # ownership" directory. (4-09 常見坑：root 擁有者)
-# diff.ignoreSubmodules=all: the course repo root (the bind mount since
-# D116 ①) tracks a gitlink (better-agent-terminal/.ct-integration/...) whose
-# .git pointer holds a Windows absolute path; on Linux every `git status` /
-# `git commit` at that repo dies with "fatal: not a git repository: ...D:/..."
-# while inspecting it (T0194). Skipping submodule inspection keeps git usable
-# inside the container; sms-platform itself has no submodules.
+# diff.ignoreSubmodules=all: a mounted repo that tracks a gitlink whose .git
+# pointer holds a Windows absolute path (the course production repo does)
+# makes every `git status` / `git commit` on Linux die with "fatal: not a git
+# repository: ...D:/..." while inspecting it. Skipping submodule inspection
+# keeps git usable inside the container; sms-platform itself has no submodules.
 RUN git config --global --add safe.directory '*' \
  && git config --global core.autocrlf false \
  && git config --global diff.ignoreSubmodules all
 
-# Control Tower skills for the claude that runs inside the container.
-# Source: BMad-Control-Tower/BMad-Control-Tower-v5.12.2/skills (8 skills),
-# passed as the BuildKit named context `ct-skills` (see compose.yaml).
-COPY --from=ct-skills / /root/.claude/skills/
+# Control Tower skills for the claude that runs inside the container: every
+# control-tower / ct-* directory with a SKILL.md in the `ct-skills` context
+# (8 skills for CT v5.12.2), e.g. a CT release's skills/ folder or your own
+# ~/.claude/skills. Without the context the image has none; install them
+# later or rebuild with SMS_CT_SKILLS (compose.yaml).
+RUN --mount=type=bind,from=ct-skills,target=/tmp/ct-skills \
+    mkdir -p /root/.claude/skills \
+ && for d in /tmp/ct-skills/control-tower /tmp/ct-skills/ct-*; do \
+      [ -f "$d/SKILL.md" ] && cp -r "$d" /root/.claude/skills/; \
+    done; \
+    n=$(ls /root/.claude/skills | wc -l); \
+    if [ "$n" = 0 ]; then echo "ct-skills: none baked in (set SMS_CT_SKILLS to add them)"; \
+    else echo "ct-skills: $n baked in"; fi
 
 # claude and node are bundled in /opt/bat-server (4-09 要點①); put them on
 # PATH for interactive shells. BAT itself resolves them through the bundle.
@@ -70,8 +85,10 @@ COPY --from=ct-skills / /root/.claude/skills/
 RUN ln -s /opt/bat-server/node_modules/@anthropic-ai/claude-code-linux-x64/claude /usr/local/bin/claude \
  && ln -s /opt/bat-server/bin/node /usr/local/bin/node
 
-# The bind mount is the course repo root (/workspace/BMad-Guide, D116 ①) so
-# .git is inside the mount; start shells in the Go module. compose.yaml sets
-# the same working_dir; `docker run` users pass -w (scripts/dev-container.sh).
-WORKDIR /workspace/BMad-Guide/courses/ct-bat-bmad-go-sms/sms-platform
+# The bind mount is the repo root, so .git is inside the mount; shells start
+# in the Go module. Default: sms-platform is the repo root, cloned as
+# ct-bat-bmad-go-sms. compose.yaml passes the same path as working_dir and
+# build arg; `docker run` users pass -w (scripts/dev-container.sh).
+ARG SMS_WORKDIR=/workspace/ct-bat-bmad-go-sms
+WORKDIR ${SMS_WORKDIR}
 # ENTRYPOINT / CMD / HEALTHCHECK / EXPOSE: inherited from bat-server. Do not override.

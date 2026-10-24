@@ -1,13 +1,13 @@
 # sms-platform docs
 
-本目錄是 API 草案與資料模型，也是 BMad 的 `project_knowledge`（`_bmad/bmm/config.yaml` 指向 `{project-root}/docs`，D-2）。
+本目錄是 API 草案與資料模型，也是 BMad 的 `project_knowledge`（`_bmad/bmm/config.yaml` 指向 `{project-root}/docs`）。
 
 | 檔案 | 內容 | 狀態 |
 |---|---|---|
-| `openapi.yaml` | § 5.4 路徑清單（OpenAPI 3.1 空殼，schema 留 TODO） | P1-c 空殼；每張實作工單補 schema；CH5 完稿 |
-| `error-codes.md` | 錯誤信封與錯誤碼清單（變更＝相容性變更） | Story 1.1 |
+| `openapi.yaml` | OpenAPI 3.1：路由、請求／回應、錯誤碼（以程式與 E2E 為準；`info.version` 1.0.0） | 骨架（`ch1-start`）是空殼，CH6 完稿；之後改到 API 行為的工單同步更新（`_ct-workorders/_local-rules.md`） |
+| `error-codes.md` | 錯誤信封與錯誤碼清單（變更＝相容性變更） | Story 1.1 起；改到錯誤碼的工單同步更新「本版已實作」欄（`_ct-workorders/_local-rules.md`） |
 | `onboarding.md` | 租戶接入文件（含重啟限制 FR-28） | Story 1.1 起 |
-| 本檔 | 資料模型草案 ↔ Go 套件對照 | P1-c |
+| 本檔 | 資料模型草案 ↔ Go 套件對照 | 骨架（`ch1-start`）起 |
 
 ## 執行設定：`PROVIDER`
 
@@ -22,7 +22,7 @@
 - `mitake` 的密碼與回呼密鑰不得出現在日誌與錯誤訊息；供應商位址只經 `cmd/smsd` 建立的受限 `http.Client`（允許清單、不跟隨轉址，AD-9）連線。
 - `mitake` 的回呼：`POST`、`application/x-www-form-urlencoded`，欄位 `msgid`、`statuscode`（`4` → `delivered`；`5`／`6`／`8` → `undelivered`；其他值拒收）、`donetime`（`yyyyMMddHHmmss`，UTC+8），密鑰放 header `X-Mitake-Secret`（D017）。
 
-## 資料模型草案（對照 COURSE-PLAN § 5.3）
+## 資料模型草案
 
 欄位只到足以規劃；定稿在 CH2 的 PRD／SPINE（`_bmad-output/planning-artifacts/`）。
 

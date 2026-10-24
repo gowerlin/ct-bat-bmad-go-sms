@@ -1,4 +1,4 @@
-# sms-platform — course demo project (COURSE-PLAN § 7.1).
+# sms-platform — course demo project.
 # `make test` is the acceptance gate for every work order (AGENTS.md).
 GO ?= go
 

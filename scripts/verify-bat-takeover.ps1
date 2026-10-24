@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-  T0196 — one-shot automated G1 acceptance of the BAT Docker wizard "Use existing"
-  takeover of the sms-platform dev container, without the GUI and without touching
-  the user's docker context, DOCKER_HOST or BAT profiles.
+  One-shot automated acceptance of the BAT Docker wizard "Use existing" takeover of the
+  sms-platform dev container, without the GUI and without touching the user's docker
+  context, DOCKER_HOST or BAT profiles.
 
 .DESCRIPTION
   1. Snapshots the environment (docker context, $env:DOCKER_HOST, BAT profiles index hash,
@@ -15,12 +15,17 @@
      then runs V6: no listener on 2375, docker context / DOCKER_HOST unchanged, BAT profiles
      index unchanged, container still healthy.
 
+  The host folder and the BAT source checkout (for node_modules/ws) are resolved by
+  verify-bat-takeover.mjs: SMS_REPO_ROOT / SMS_BAT_SRC from the environment or from .env
+  next to compose.yaml; -BatSrc overrides SMS_BAT_SRC.
+
   Exit code: 0 = V1–V6 all PASS; 1 = a check failed; 2 = usage / environment error.
   Secrets (server token, certificate fingerprint) are never printed in full.
 
 .EXAMPLE
   .\scripts\verify-bat-takeover.ps1
-  .\scripts\verify-bat-takeover.ps1 -Json "$env:TEMP\t0196.json"
+  .\scripts\verify-bat-takeover.ps1 -Json "$env:TEMP\bat-takeover.json"
+  .\scripts\verify-bat-takeover.ps1 -BatSrc <BAT source checkout>
   .\scripts\verify-bat-takeover.ps1 -Distro Ubuntu-24.04 -Container bat-server-sms-platform
 #>
 param(
@@ -28,6 +33,7 @@ param(
   [string]$Distro = '',
   [string]$Json = '',
   [string]$NodeExe = '',
+  [string]$BatSrc = '',
   [int]$RelayPort = 2375,
   [switch]$KeepRelay,
   [switch]$SkipPty
@@ -60,7 +66,7 @@ $indexPath = Join-Path $userData 'profiles\index.json'
 $indexBefore = if (Test-Path $indexPath) { (Get-FileHash -Algorithm SHA256 $indexPath).Hash } else { '(absent)' }
 $healthBefore = (Invoke-Wsl "docker inspect --format '{{.State.Health.Status}}' $Container").Output
 
-Write-Host "T0196 verify-bat-takeover.ps1 — container $Container, relay 127.0.0.1:$RelayPort"
+Write-Host "verify-bat-takeover.ps1 — container $Container, relay 127.0.0.1:$RelayPort"
 Write-Host "  before: docker context=$ctxBefore DOCKER_HOST=$(if ($envBefore) { $envBefore } else { '(unset)' }) profiles-index=$($indexBefore.Substring(0, [Math]::Min(12, $indexBefore.Length)))… container=$healthBefore"
 
 # ── relay ───────────────────────────────────────────────────────────────────────
@@ -80,6 +86,7 @@ try {
   $nodeArgs = @($mjs, '--container', $Container, '--docker-host', "tcp://127.0.0.1:$RelayPort")
   if ($Json) { $nodeArgs += @('--json', $Json) }
   if ($SkipPty) { $nodeArgs += '--skip-pty' }
+  if ($BatSrc) { $nodeArgs += @('--bat-src', $BatSrc) }
   & $node @nodeArgs
   $nodeExit = $LASTEXITCODE
 } finally {

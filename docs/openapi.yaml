@@ -1,4 +1,4 @@
-# sms-platform API — OpenAPI 完稿（COURSE-PLAN § 5.4；P1-c 空殼 → CH6 完稿）。
+# sms-platform API — OpenAPI 完稿（ch1-start 是空殼，CH6 完稿）。
 # 以 internal/httpapi 的路由註冊與錯誤對應、e2e/ 的 TestE2E_* 為準；每個 operation 的
 # x-e2e 列出驗證它的 E2E 測試名。錯誤碼清單的權威是 docs/error-codes.md。
 openapi: 3.1.0

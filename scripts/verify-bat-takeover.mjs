@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * verify-bat-takeover.mjs — T0196: automated G1 acceptance for "BAT Docker wizard →
- * Use existing" against the sms-platform dev container (WSL Docker, D113 / D115).
+ * verify-bat-takeover.mjs — automated acceptance for "BAT Docker wizard →
+ * Use existing" against the sms-platform dev container (Docker inside WSL, reached
+ * from Windows through scripts/wsl-docker-relay.sh).
  *
  * BAT has no CLI / Remote API that creates or tests a Docker profile: `docker:*` and
  * `profile:create` / `profile:update` are `ipcMain.handle` channels for the renderer only
@@ -27,14 +28,19 @@
  * BEFORE the real auth: the server counts failed server-token auths per IP (5 within 60 s ⇒
  * 10-minute ban, electron/remote/remote-server.ts), and a successful auth clears that counter.
  *
- * Dependencies: only `ws` from the BAT source checkout's node_modules (--bat-src); no global
- * install. Node ≥ 20.
+ * Dependencies: only `ws` from a BAT source checkout's node_modules (--bat-src or SMS_BAT_SRC);
+ * no global install. Node ≥ 20.
+ *
+ * Layout: the host folder defaults to the git repo root that contains sms-platform/ (the
+ * public repo: sms-platform itself), the same folder compose.yaml / scripts/dev-container.sh
+ * mount. SMS_REPO_ROOT and SMS_BAT_SRC come from the environment or from .env next to
+ * compose.yaml (the environment wins); relative paths there are relative to sms-platform/.
  *
  * Exit code: 0 = every check PASS; 1 = at least one FAIL; 2 = usage / environment error.
  */
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import * as tls from 'node:tls'
@@ -42,14 +48,44 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
+const smsPlatform = path.resolve(here, '..')
+
+/** SMS_<key> from the environment, else from sms-platform/.env (same rule as dev-container.sh). */
+function smsSetting(key) {
+  if (process.env[key]) return process.env[key]
+  let text
+  try { text = readFileSync(path.join(smsPlatform, '.env'), 'utf8') } catch { return undefined }
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\r$/, '')
+    if (line.startsWith(`${key}=`)) return line.slice(key.length + 1).replace(/^(["'])(.*)\1$/, '$2') || undefined
+  }
+  return undefined
+}
+
+/** The folder compose.yaml mounts: SMS_REPO_ROOT, else the git repo root holding sms-platform/. */
+function defaultHostFolder() {
+  const configured = smsSetting('SMS_REPO_ROOT')
+  if (configured) return path.resolve(smsPlatform, configured)
+  try {
+    const top = execFileSync('git', ['-C', smsPlatform, 'rev-parse', '--show-toplevel'], {
+      encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+    if (top) return path.resolve(top)
+  } catch { /* not a git checkout: sms-platform is the root */ }
+  return smsPlatform
+}
+
+/** Container working_dir: /workspace/<host folder name>/<sms-platform relative to it>. */
+function defaultExpectCwd(hostFolder) {
+  const rel = path.relative(hostFolder, smsPlatform).split(path.sep).filter(Boolean).join('/')
+  return `/workspace/${basename(hostFolder)}${rel ? `/${rel}` : ''}`
+}
+
 const DEFAULTS = {
   container: 'bat-server-sms-platform',
   dockerHost: 'tcp://127.0.0.1:2375',
-  hostFolder: path.resolve(here, '..', '..', '..', '..'),            // course repo root (compose mounts ../../..)
-  expectCwd: '/workspace/BMad-Guide/courses/ct-bat-bmad-go-sms/sms-platform',
   expectGo: '1.27.3',
   expectSkills: '8',
-  batSrc: path.resolve(here, '..', '..', '..', '..', 'better-agent-terminal', 'better-agent-terminal'),
   timeout: '15000',
 }
 const SERVER_CONTAINER_PORT_KEY = '9876/tcp'
@@ -63,12 +99,14 @@ const ANSI_RX = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1
 const USAGE = `Usage: node verify-bat-takeover.mjs [options]
   --container <name>    Docker container (default ${DEFAULTS.container})
   --docker-host <url>   DOCKER_HOST for every docker call (default ${DEFAULTS.dockerHost}; the WSL relay)
-  --host-folder <path>  the folder the wizard would be given (default: course repo root)
-  --expect-cwd <path>   expected pwd of a tab started in the container working_dir (default ${DEFAULTS.expectCwd})
+  --host-folder <path>  the folder the wizard would be given (default: SMS_REPO_ROOT, else the git
+                        repo root containing sms-platform/)
+  --expect-cwd <path>   expected pwd of a tab started in the container working_dir
+                        (default /workspace/<host folder name>/<sms-platform relative to it>)
   --expect-go <ver>     expected Go version (default ${DEFAULTS.expectGo})
   --expect-skills <n>   expected number of entries in ~/.claude/skills (default ${DEFAULTS.expectSkills})
   --bat-port <n>        BAT's own RemoteServer port to refuse (default $BAT_REMOTE_PORT or 9876)
-  --bat-src <dir>       BAT source checkout providing node_modules/ws (default ../../../../better-agent-terminal/better-agent-terminal)
+  --bat-src <dir>       BAT source checkout providing node_modules/ws (default SMS_BAT_SRC; required)
   --json <file>         write the results (secrets redacted) as JSON
   --timeout <ms>        per-step timeout (default ${DEFAULTS.timeout})
   --skip-pty            skip V5 (no PTY is opened)
@@ -88,15 +126,18 @@ function parseCli(argv) {
     strict: true,
   })
   if (values.help) { console.log(USAGE); process.exit(0) }
+  const hostFolder = path.resolve(values['host-folder'] ?? defaultHostFolder())
+  const batSrc = values['bat-src'] ?? (smsSetting('SMS_BAT_SRC') && path.resolve(smsPlatform, smsSetting('SMS_BAT_SRC')))
+  if (!batSrc) throw new UsageError('no BAT source checkout: pass --bat-src <dir> or set SMS_BAT_SRC (environment or .env); it must hold node_modules/ws')
   const opts = {
     container: values.container ?? DEFAULTS.container,
     dockerHost: values['docker-host'] ?? DEFAULTS.dockerHost,
-    hostFolder: path.resolve(values['host-folder'] ?? DEFAULTS.hostFolder),
-    expectCwd: values['expect-cwd'] ?? DEFAULTS.expectCwd,
+    hostFolder,
+    expectCwd: values['expect-cwd'] ?? defaultExpectCwd(hostFolder),
     expectGo: values['expect-go'] ?? DEFAULTS.expectGo,
     expectSkills: Number(values['expect-skills'] ?? DEFAULTS.expectSkills),
     batPort: Number(values['bat-port'] ?? process.env.BAT_REMOTE_PORT ?? 9876),
-    batSrc: path.resolve(values['bat-src'] ?? DEFAULTS.batSrc),
+    batSrc: path.resolve(batSrc),
     json: values.json,
     timeout: Number(values.timeout ?? DEFAULTS.timeout),
     skipPty: values['skip-pty'] === true,
@@ -334,7 +375,7 @@ async function main() {
   const opts = parseCli(process.argv.slice(2))
   const d = { dockerHost: opts.dockerHost }
   const startedAt = new Date().toISOString()
-  console.log(`T0196 verify-bat-takeover — container ${opts.container}, DOCKER_HOST=${opts.dockerHost}, host folder ${opts.hostFolder}`)
+  console.log(`verify-bat-takeover — container ${opts.container}, DOCKER_HOST=${opts.dockerHost}, host folder ${opts.hostFolder}`)
 
   // `ws` from the BAT source checkout (no global install)
   let WebSocket
@@ -445,9 +486,9 @@ async function main() {
       // a random token of the same length; never `batcap.`-shaped so it exercises the server-token path
       const wrong = randomBytes(Math.max(16, Math.ceil(token.length / 2))).toString('hex').slice(0, token.length)
       let negative
-      try { await mk(wrong, 'T0196 negative probe').connect(); negative = 'ACCEPTED' } catch (error) { negative = `${error.code}: ${error.message}` }
+      try { await mk(wrong, 'verify-bat-takeover negative probe').connect(); negative = 'ACCEPTED' } catch (error) { negative = `${error.code}: ${error.message}` }
       if (negative === 'ACCEPTED') throw new Error('a wrong token was ACCEPTED')
-      client = mk(token, 'T0196 verify-bat-takeover')
+      client = mk(token, 'verify-bat-takeover')
       ;({ metadata } = await client.connect())
       const md = metadata && typeof metadata === 'object' ? metadata : {}
       record('V4', 'connect-test: wrong token refused; token + pinned fingerprint authenticated', 'PASS',

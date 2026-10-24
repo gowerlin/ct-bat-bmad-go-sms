@@ -4,10 +4,10 @@ bin/
 *.test
 *.out
 
-# secrets (COURSE-PLAN § 6.3): only .env.example is committed
+# secrets: only .env.example is committed
 .env
 
-# BMad installer output (T0193 Step 2.3): the skill copies are large and
+# BMad installer output: the skill copies are large and
 # reproducible — re-run the install command in README.md "安裝 BMad".
 # _bmad/ (config + manifest) IS committed; _bmad-output/ IS committed.
 .agents/

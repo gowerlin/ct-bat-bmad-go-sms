@@ -1,5 +1,4 @@
-// Package ratelimit owns per-API-key rate limiting (COURSE-PLAN § 5.1 #6,
-// T0005): the algorithm (token bucket vs fixed window is the T0005
+// Package ratelimit owns per-API-key rate limiting (T0005): the algorithm (token bucket vs fixed window is the T0005
 // tower_question) and the Retry-After computation.
 //
 // Package boundary:

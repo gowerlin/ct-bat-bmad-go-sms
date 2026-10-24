@@ -18,7 +18,6 @@
 //     are consulted via featureErrorMappers before the 500 default, and
 //     writeError remains the only place the envelope is written (AD-8).
 //
-// COURSE-PLAN § 7.1 names this directory `api`; § 4 (1-06) names it
-// `httpapi`. The skeleton uses `httpapi` because the name says what kind of
+// The directory is `httpapi`, not `api`, because the name says what kind of
 // API it is (HTTP), leaving `api` free for a future non-HTTP surface.
 package httpapi

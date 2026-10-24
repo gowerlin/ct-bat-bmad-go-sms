@@ -1,6 +1,6 @@
 // Package provider defines the SMS supplier boundary: the Provider interface
 // and the message / receipt / delivery-report types that cross it
-// (COURSE-PLAN § 6.2).
+// (mock for the course mainline, a simulated supplier adapter from CH5).
 //
 // Package boundary:
 //   - owns: the adapter contract. Sub-packages implement it: mock (course

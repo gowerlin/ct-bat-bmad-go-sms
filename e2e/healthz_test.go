@@ -9,8 +9,7 @@ import (
 	"example.com/sms-platform/e2e/testutil"
 )
 
-// TestE2E_Healthz is the first acceptance gate (COURSE-PLAN § 5.1 #8,
-// T0001): the real handler, served over HTTP, answers GET /healthz with
+// TestE2E_Healthz is the first acceptance gate (T0001): the real handler, served over HTTP, answers GET /healthz with
 // 200 and {"status":"ok"}.
 func TestE2E_Healthz(t *testing.T) {
 	env := testutil.NewTestServer(t)

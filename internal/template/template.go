@@ -28,7 +28,7 @@ func (e *MissingVariableError) Error() string {
 
 func (e *MissingVariableError) Unwrap() error { return ErrMissingVariable }
 
-// Template is a tenant's message template (§ 5.3).
+// Template is a tenant's message template (data model in docs/README.md).
 type Template struct {
 	ID        string
 	TenantID  string
