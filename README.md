@@ -8,7 +8,8 @@
 ## 學員從這裡開始
 
 - 課程影片：https://www.youtube.com/playlist?list=PLM1w-3eL8kgI
-- 課程 Portal（各章道館說明、參考解導讀）：https://gowerlin.github.io/Control-Tower/course
+- 課程 Portal（課程總覽、投影片下載）：https://gowerlin.github.io/Control-Tower/course
+- 道館說明（各章道館題目、參考解導讀）：https://gowerlin.github.io/Control-Tower/course-dojo
 - 本 repo：https://github.com/gowerlin/ct-bat-bmad-go-sms
 
 **1. clone**：本 repo 的根目錄就是 sms-platform（Go module 在根目錄）。
